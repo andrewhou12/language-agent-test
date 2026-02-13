@@ -21,6 +21,7 @@ import {
   IPC_CHANNELS,
 } from '../shared/types';
 import { OpenAITranscription } from './openai-transcription';
+import { WhisperLiveClient, TranscriptionSegment } from './whisper-live-client';
 
 // Initialize settings store
 const store = new Store<{ settings: AppSettings }>({
@@ -37,16 +38,27 @@ let tray: Tray | null = null;
 // State
 let transcriptionState: TranscriptionState = 'idle';
 let transcriptionService: OpenAITranscription | null = null;
+let whisperLiveClient: WhisperLiveClient | null = null;
+let useWhisperLive = true; // Toggle between WhisperLive and OpenAI API
+
+// WhisperLive server config (can be made configurable via settings)
+const WHISPER_LIVE_CONFIG = {
+  host: 'localhost',
+  port: 9090,
+  useVad: true,
+  model: 'tiny',
+};
 
 // macOS system audio capture
 let systemAudioProc: ChildProcess | null = null;
 
 // Audio format constants (matching DESKTOP_AUDIO_CAPTURE_RESEARCH.md)
-const SAMPLE_RATE = 24000;
+const CAPTURE_SAMPLE_RATE = 24000; // From native binary
+const WHISPER_SAMPLE_RATE = 16000; // Required by Whisper
 const CHANNELS = 2; // stereo from native binary
 const BYTES_PER_SAMPLE = 2; // 16-bit
 const CHUNK_DURATION = 0.1; // 100ms chunks
-const CHUNK_SIZE = SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
+const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 
 function convertStereoToMono(stereoBuffer: Buffer): Buffer {
   const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair
@@ -58,6 +70,36 @@ function convertStereoToMono(stereoBuffer: Buffer): Buffer {
   }
 
   return monoBuffer;
+}
+
+function resampleInt16(input: Int16Array, fromRate: number, toRate: number): Int16Array {
+  if (fromRate === toRate) return input;
+
+  const ratio = fromRate / toRate;
+  const outputLength = Math.floor(input.length / ratio);
+  const output = new Int16Array(outputLength);
+
+  for (let i = 0; i < outputLength; i++) {
+    const srcIndex = i * ratio;
+    const srcIndexFloor = Math.floor(srcIndex);
+    const srcIndexCeil = Math.min(srcIndexFloor + 1, input.length - 1);
+    const fraction = srcIndex - srcIndexFloor;
+
+    // Linear interpolation
+    output[i] = Math.round(
+      input[srcIndexFloor] * (1 - fraction) + input[srcIndexCeil] * fraction
+    );
+  }
+
+  return output;
+}
+
+function int16ToFloat32(int16Data: Int16Array): Float32Array {
+  const float32Data = new Float32Array(int16Data.length);
+  for (let i = 0; i < int16Data.length; i++) {
+    float32Data[i] = int16Data[i] / 32768.0;
+  }
+  return float32Data;
 }
 
 function startMacOSAudioCapture(): boolean {
@@ -99,14 +141,20 @@ function startMacOSAudioCapture(): boolean {
         const chunk = audioBuffer.slice(0, CHUNK_SIZE);
         audioBuffer = audioBuffer.slice(CHUNK_SIZE);
 
-        // Convert stereo to mono
+        // Convert stereo to mono (Int16)
         const monoChunk = convertStereoToMono(chunk);
+        const int16Data = new Int16Array(monoChunk.buffer, monoChunk.byteOffset, monoChunk.length / 2);
 
-        // Convert to base64 for IPC
-        const base64Data = monoChunk.toString('base64');
-
-        // Send to renderer
-        controlWindow?.webContents.send(IPC_CHANNELS.SYSTEM_AUDIO_DATA, { data: base64Data });
+        if (useWhisperLive && whisperLiveClient?.connected) {
+          // Stream directly to WhisperLive server
+          // Resample from 24kHz to 16kHz and send as Int16 bytes
+          const resampled = resampleInt16(int16Data, CAPTURE_SAMPLE_RATE, WHISPER_SAMPLE_RATE);
+          whisperLiveClient.sendAudioInt16(resampled);
+        } else {
+          // Send to renderer for OpenAI API batching
+          const base64Data = monoChunk.toString('base64');
+          controlWindow?.webContents.send(IPC_CHANNELS.SYSTEM_AUDIO_DATA, { data: base64Data });
+        }
       }
     });
 
@@ -312,14 +360,59 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
     updateState('starting');
     const settings = getSettings();
 
-    // Check for API key
-    if (!settings.openaiApiKey) {
-      updateState('idle');
-      return { success: false, error: 'Please set your OpenAI API key in settings' };
-    }
+    if (useWhisperLive) {
+      // Connect to WhisperLive server
+      console.log('Connecting to WhisperLive server...');
+      whisperLiveClient = new WhisperLiveClient({
+        ...WHISPER_LIVE_CONFIG,
+        language: settings.language === 'auto' ? undefined : settings.language,
+      });
 
-    // Initialize transcription service
-    transcriptionService = new OpenAITranscription(settings.openaiApiKey, settings.language);
+      // Set up transcription handler
+      whisperLiveClient.on('transcription', (segments: TranscriptionSegment[]) => {
+        // Get the latest segment
+        const latest = segments[segments.length - 1];
+        if (latest && latest.text.trim()) {
+          console.log('WhisperLive transcription:', latest.text);
+          sendTranscriptionToOverlay({
+            text: latest.text,
+            timestamp: Date.now(),
+            confidence: 1.0,
+            language: settings.language === 'auto' ? undefined : settings.language,
+          });
+        }
+      });
+
+      whisperLiveClient.on('error', (error) => {
+        console.error('WhisperLive error:', error);
+        controlWindow?.webContents.send(IPC_CHANNELS.ERROR_OCCURRED, error.message || 'WhisperLive error');
+      });
+
+      whisperLiveClient.on('language-detected', (info) => {
+        console.log('Language detected:', info);
+      });
+
+      try {
+        await whisperLiveClient.connect();
+        console.log('Connected to WhisperLive server');
+      } catch (error) {
+        console.error('Failed to connect to WhisperLive:', error);
+        updateState('idle');
+        return {
+          success: false,
+          error: 'Failed to connect to WhisperLive server. Make sure it\'s running on localhost:9090',
+        };
+      }
+    } else {
+      // Check for API key (only needed for OpenAI mode)
+      if (!settings.openaiApiKey) {
+        updateState('idle');
+        return { success: false, error: 'Please set your OpenAI API key in settings' };
+      }
+
+      // Initialize OpenAI transcription service
+      transcriptionService = new OpenAITranscription(settings.openaiApiKey, settings.language);
+    }
 
     // Show overlay
     overlayWindow?.show();
@@ -344,7 +437,14 @@ async function stopTranscription(): Promise<{ success: boolean }> {
   updateState('stopping');
 
   try {
-    // Cleanup transcription service
+    // Cleanup WhisperLive client
+    if (whisperLiveClient) {
+      whisperLiveClient.endStream();
+      whisperLiveClient.disconnect();
+      whisperLiveClient = null;
+    }
+
+    // Cleanup OpenAI transcription service
     transcriptionService = null;
 
     // Hide overlay
@@ -465,7 +565,7 @@ function setupIpcHandlers(): void {
       const audioBuffer = Buffer.from(base64Data, 'base64');
 
       // The audio is 16-bit PCM at 24kHz - convert to WAV for Whisper
-      const wavBuffer = createWavFromPcm(audioBuffer, SAMPLE_RATE);
+      const wavBuffer = createWavFromPcm(audioBuffer, CAPTURE_SAMPLE_RATE);
 
       const result = await transcriptionService.transcribe(wavBuffer);
 
