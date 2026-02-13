@@ -1,0 +1,14 @@
+/**
+ * Preload script for Overlay window
+ *
+ * Exposes a minimal API for receiving transcription updates
+ * and style changes from the main process.
+ */
+import { TranscriptionResult, OverlayStyle } from '../shared/types';
+export interface OverlayAPI {
+    onTranscriptionUpdate: (callback: (result: TranscriptionResult) => void) => void;
+    onClearTranscription: (callback: () => void) => void;
+    onStyleUpdate: (callback: (style: OverlayStyle) => void) => void;
+    removeAllListeners: () => void;
+}
+//# sourceMappingURL=preload-overlay.d.ts.map

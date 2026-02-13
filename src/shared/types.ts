@@ -1,0 +1,139 @@
+// Shared type definitions for the Language Agent application
+
+export type TranscriptionState = 'idle' | 'starting' | 'active' | 'stopping';
+
+export type WhisperModel = 'tiny' | 'base' | 'small';
+
+export type SupportedLanguage =
+  | 'ja' // Japanese
+  | 'ko' // Korean
+  | 'zh' // Chinese (Mandarin)
+  | 'es' // Spanish
+  | 'fr' // French
+  | 'de' // German
+  | 'en' // English
+  | 'auto'; // Auto-detect
+
+export interface TranscriptionResult {
+  text: string;
+  timestamp: number;
+  confidence: number;
+  language?: string;
+}
+
+export interface OverlayPosition {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface OverlayStyle {
+  position: 'bottom' | 'top' | 'custom';
+  customPosition?: { x: number; y: number };
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  textColor: string;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  textShadow: boolean;
+  textOutline: boolean;
+  maxLines: number;
+  displayDuration: number; // in seconds
+}
+
+export interface AppSettings {
+  // API settings
+  openaiApiKey: string;
+
+  // Model settings
+  whisperModel: WhisperModel;
+  language: SupportedLanguage;
+
+  // Performance settings
+  gpuAcceleration: boolean;
+  chunkSize: number; // in seconds (1-3)
+
+  // Overlay settings
+  overlayStyle: OverlayStyle;
+
+  // Shortcuts
+  toggleShortcut: string;
+  showHideShortcut: string;
+
+  // General
+  autoStart: boolean;
+  minimizeToTray: boolean;
+}
+
+export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
+  position: 'bottom',
+  fontFamily: 'system-ui, "Noto Sans CJK", sans-serif',
+  fontSize: 24,
+  fontWeight: 400,
+  textColor: '#FFFFFF',
+  backgroundColor: '#000000',
+  backgroundOpacity: 0.7,
+  textShadow: true,
+  textOutline: false,
+  maxLines: 2,
+  displayDuration: 5,
+};
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  openaiApiKey: '',
+  whisperModel: 'base',
+  language: 'auto',
+  gpuAcceleration: true,
+  chunkSize: 2,
+  overlayStyle: DEFAULT_OVERLAY_STYLE,
+  toggleShortcut: 'CommandOrControl+Shift+S',
+  showHideShortcut: 'CommandOrControl+Shift+H',
+  autoStart: false,
+  minimizeToTray: true,
+};
+
+export const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
+  ja: 'Japanese',
+  ko: 'Korean',
+  zh: 'Chinese (Mandarin)',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+  en: 'English',
+  auto: 'Auto-detect',
+};
+
+export const MODEL_INFO: Record<WhisperModel, { size: string; speed: string; accuracy: string }> = {
+  tiny: { size: '~75MB', speed: 'Fastest', accuracy: 'Good' },
+  base: { size: '~150MB', speed: 'Fast', accuracy: 'Better' },
+  small: { size: '~500MB', speed: 'Moderate', accuracy: 'Best' },
+};
+
+// IPC Channel names
+export const IPC_CHANNELS = {
+  // Control -> Main
+  START_TRANSCRIPTION: 'start-transcription',
+  STOP_TRANSCRIPTION: 'stop-transcription',
+  GET_SETTINGS: 'get-settings',
+  UPDATE_SETTINGS: 'update-settings',
+  GET_STATE: 'get-state',
+  TRANSCRIBE_AUDIO: 'transcribe-audio',
+  GET_DESKTOP_SOURCES: 'get-desktop-sources',
+
+  // Audio capture
+  START_SYSTEM_AUDIO: 'start-system-audio',
+  STOP_SYSTEM_AUDIO: 'stop-system-audio',
+  SYSTEM_AUDIO_DATA: 'system-audio-data',
+  SEND_AUDIO_DATA: 'send-audio-data',
+
+  // Main -> Overlay
+  TRANSCRIPTION_UPDATE: 'transcription-update',
+  CLEAR_TRANSCRIPTION: 'clear-transcription',
+  UPDATE_OVERLAY_STYLE: 'update-overlay-style',
+
+  // Main -> Control
+  STATE_CHANGED: 'state-changed',
+  ERROR_OCCURRED: 'error-occurred',
+} as const;

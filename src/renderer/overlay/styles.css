@@ -1,0 +1,126 @@
+/* Subtitle Overlay Styles */
+
+.subtitle-overlay {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 20px;
+  pointer-events: none;
+}
+
+.subtitle-container {
+  max-width: 90%;
+  text-align: center;
+}
+
+.subtitle-line {
+  display: inline-block;
+  padding: 8px 20px;
+  margin: 4px 0;
+  border-radius: 6px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.subtitle-line.fading-out {
+  animation: fadeOut 0.5s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* Text shadow for readability */
+.text-shadow {
+  text-shadow:
+    1px 1px 2px rgba(0, 0, 0, 0.8),
+    -1px -1px 2px rgba(0, 0, 0, 0.8),
+    1px -1px 2px rgba(0, 0, 0, 0.8),
+    -1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Text outline for maximum readability */
+.text-outline {
+  -webkit-text-stroke: 1px rgba(0, 0, 0, 0.8);
+}
+
+/* Position variants */
+.subtitle-overlay.position-top {
+  top: 0;
+  bottom: auto;
+  justify-content: flex-start;
+}
+
+.subtitle-overlay.position-bottom {
+  top: auto;
+  bottom: 0;
+  justify-content: flex-end;
+}
+
+/* Language-specific font adjustments */
+.lang-ja,
+.lang-zh,
+.lang-ko {
+  font-family:
+    "Noto Sans CJK JP",
+    "Noto Sans CJK SC",
+    "Noto Sans CJK KR",
+    "Hiragino Sans",
+    "Meiryo",
+    "Microsoft YaHei",
+    "Malgun Gothic",
+    system-ui,
+    sans-serif;
+  line-height: 1.6;
+}
+
+/* Status indicator (when no transcription) */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 20px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
