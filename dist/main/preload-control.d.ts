@@ -14,9 +14,6 @@ export interface ControlAPI {
         success: boolean;
     }>;
     getDesktopSources: () => Promise<Electron.DesktopCapturerSource[]>;
-    transcribeAudio: (audioData: ArrayBuffer) => Promise<{
-        text: string;
-    } | null>;
     startSystemAudio: () => Promise<{
         success: boolean;
         platform?: string;
@@ -25,15 +22,13 @@ export interface ControlAPI {
     stopSystemAudio: () => Promise<{
         success: boolean;
     }>;
-    sendAudioData: (base64Data: string) => Promise<{
-        text: string;
-    } | null>;
-    onSystemAudioData: (callback: (data: {
-        data: string;
-    }) => void) => void;
+    streamAudioChunk: (base64Data: string) => Promise<{
+        success: boolean;
+    }>;
     getSettings: () => Promise<AppSettings>;
     updateSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>;
     getState: () => Promise<TranscriptionState>;
+    getDiagnostics: () => Promise<any>;
     onStateChanged: (callback: (state: TranscriptionState) => void) => void;
     onError: (callback: (error: string) => void) => void;
     removeAllListeners: () => void;

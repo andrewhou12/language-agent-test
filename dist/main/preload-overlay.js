@@ -26,7 +26,7 @@ exports.DEFAULT_OVERLAY_STYLE = {
     displayDuration: 5,
 };
 exports.DEFAULT_SETTINGS = {
-    openaiApiKey: '',
+    deepgramApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
@@ -66,7 +66,7 @@ exports.IPC_CHANNELS = {
     START_SYSTEM_AUDIO: 'start-system-audio',
     STOP_SYSTEM_AUDIO: 'stop-system-audio',
     SYSTEM_AUDIO_DATA: 'system-audio-data',
-    SEND_AUDIO_DATA: 'send-audio-data',
+    STREAM_AUDIO_CHUNK: 'stream-audio-chunk', // New: stream audio directly to Deepgram
     // Main -> Overlay
     TRANSCRIPTION_UPDATE: 'transcription-update',
     CLEAR_TRANSCRIPTION: 'clear-transcription',
@@ -74,6 +74,8 @@ exports.IPC_CHANNELS = {
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',
+    // Diagnostics
+    GET_DIAGNOSTICS: 'get-diagnostics',
 };
 
 

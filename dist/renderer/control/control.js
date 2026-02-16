@@ -35639,7 +35639,10 @@ function ControlPanel() {
     const [isLoading, setIsLoading] = (0, react_1.useState)(true);
     const [apiKeyInput, setApiKeyInput] = (0, react_1.useState)('');
     const [showApiKey, setShowApiKey] = (0, react_1.useState)(false);
+    const [showDiagnostics, setShowDiagnostics] = (0, react_1.useState)(false);
+    const [diagnostics, setDiagnostics] = (0, react_1.useState)(null);
     const stopCaptureRef = (0, react_1.useRef)(null);
+    const diagnosticsIntervalRef = (0, react_1.useRef)(null);
     const { startCapture, stopCapture } = (0, useSystemAudio_1.useSystemAudio)({
         onError: (err) => setError(err),
     });
@@ -35657,7 +35660,7 @@ function ControlPanel() {
                 ]);
                 setState(currentState);
                 setSettings(currentSettings);
-                setApiKeyInput(currentSettings.openaiApiKey || '');
+                setApiKeyInput(currentSettings.deepgramApiKey || '');
             }
             catch (err) {
                 setError('Failed to load settings');
@@ -35676,8 +35679,38 @@ function ControlPanel() {
         });
         return () => {
             window.electronAPI.removeAllListeners();
+            if (diagnosticsIntervalRef.current) {
+                clearInterval(diagnosticsIntervalRef.current);
+            }
         };
     }, []);
+    // Poll diagnostics when active or when diagnostics panel is shown
+    (0, react_1.useEffect)(() => {
+        const fetchDiagnostics = async () => {
+            try {
+                const data = await window.electronAPI.getDiagnostics();
+                setDiagnostics(data);
+            }
+            catch (err) {
+                console.error('Failed to fetch diagnostics:', err);
+            }
+        };
+        if (showDiagnostics || state === 'active') {
+            fetchDiagnostics();
+            diagnosticsIntervalRef.current = setInterval(fetchDiagnostics, 1000);
+        }
+        else {
+            if (diagnosticsIntervalRef.current) {
+                clearInterval(diagnosticsIntervalRef.current);
+                diagnosticsIntervalRef.current = null;
+            }
+        }
+        return () => {
+            if (diagnosticsIntervalRef.current) {
+                clearInterval(diagnosticsIntervalRef.current);
+            }
+        };
+    }, [showDiagnostics, state]);
     const handleToggle = (0, react_1.useCallback)(async () => {
         setError(null);
         if (state === 'active') {
@@ -35715,7 +35748,7 @@ function ControlPanel() {
     const handleApiKeySave = (0, react_1.useCallback)(async () => {
         if (!settings)
             return;
-        const updated = await window.electronAPI.updateSettings({ openaiApiKey: apiKeyInput });
+        const updated = await window.electronAPI.updateSettings({ deepgramApiKey: apiKeyInput });
         setSettings(updated);
         setError(null);
     }, [settings, apiKeyInput]);
@@ -35724,8 +35757,8 @@ function ControlPanel() {
     }
     const isTransitioning = state === 'starting' || state === 'stopping';
     const isActive = state === 'active';
-    const hasApiKey = !!settings.openaiApiKey;
-    return ((0, jsx_runtime_1.jsxs)("div", { className: "control-panel", children: [(0, jsx_runtime_1.jsxs)("div", { className: "header", children: [(0, jsx_runtime_1.jsx)("h1", { children: "Language Agent" }), (0, jsx_runtime_1.jsx)("p", { className: "subtitle", children: "Real-Time Subtitles for Language Learning" })] }), !hasApiKey && ((0, jsx_runtime_1.jsx)("div", { className: "api-key-section", children: (0, jsx_runtime_1.jsxs)("div", { className: "api-key-warning", children: [(0, jsx_runtime_1.jsx)("span", { className: "warning-icon", children: "\u26A0\uFE0F" }), (0, jsx_runtime_1.jsx)("span", { children: "OpenAI API key required" })] }) })), (0, jsx_runtime_1.jsxs)("div", { className: "status-section", children: [(0, jsx_runtime_1.jsxs)("div", { className: "status-indicator", children: [(0, jsx_runtime_1.jsx)("span", { className: `status-dot ${state}` }), (0, jsx_runtime_1.jsx)("span", { className: "status-text", children: STATUS_TEXT[state] })] }), (0, jsx_runtime_1.jsx)("button", { className: `toggle-button ${isActive ? 'stop' : 'start'}`, onClick: handleToggle, disabled: isTransitioning || !hasApiKey, children: isActive ? ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(StopIcon, {}), " Stop Transcription"] })) : ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(PlayIcon, {}), " Start Transcription"] })) }), error && (0, jsx_runtime_1.jsx)("div", { className: "error-message", children: error })] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-section", children: [(0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsx)("h3", { children: "API Configuration" }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row api-key-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "OpenAI API Key" }), (0, jsx_runtime_1.jsxs)("div", { className: "api-key-input-wrapper", children: [(0, jsx_runtime_1.jsx)("input", { type: showApiKey ? 'text' : 'password', value: apiKeyInput, onChange: handleApiKeyChange, placeholder: "sk-...", className: "api-key-input", disabled: isActive }), (0, jsx_runtime_1.jsx)("button", { className: "api-key-toggle", onClick: () => setShowApiKey(!showApiKey), type: "button", children: showApiKey ? '🙈' : '👁️' })] })] }), apiKeyInput !== settings.openaiApiKey && ((0, jsx_runtime_1.jsx)("button", { className: "save-api-key-button", onClick: handleApiKeySave, children: "Save API Key" }))] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsx)("h3", { children: "Language" }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Target Language" }), (0, jsx_runtime_1.jsx)("div", { className: "select-wrapper", children: (0, jsx_runtime_1.jsx)("select", { value: settings.language, onChange: (e) => handleLanguageChange(e.target.value), disabled: isActive, children: Object.entries(types_1.LANGUAGE_NAMES).map(([code, name]) => ((0, jsx_runtime_1.jsx)("option", { value: code, children: name }, code))) }) })] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsx)("h3", { children: "Shortcuts" }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Toggle Transcription" }), (0, jsx_runtime_1.jsx)("span", { className: "shortcut-key", children: formatShortcut(settings.toggleShortcut) })] }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Show/Hide Overlay" }), (0, jsx_runtime_1.jsx)("span", { className: "shortcut-key", children: formatShortcut(settings.showHideShortcut) })] })] })] }), (0, jsx_runtime_1.jsx)("div", { className: "footer", children: (0, jsx_runtime_1.jsx)("p", { children: "v1.0.0 - Phase 1: Same-Language Subtitles" }) })] }));
+    const hasApiKey = !!settings.deepgramApiKey;
+    return ((0, jsx_runtime_1.jsxs)("div", { className: "control-panel", children: [(0, jsx_runtime_1.jsxs)("div", { className: "header", children: [(0, jsx_runtime_1.jsx)("h1", { children: "Language Agent" }), (0, jsx_runtime_1.jsx)("p", { className: "subtitle", children: "Real-Time Subtitles for Language Learning" })] }), !hasApiKey && ((0, jsx_runtime_1.jsx)("div", { className: "api-key-section", children: (0, jsx_runtime_1.jsxs)("div", { className: "api-key-warning", children: [(0, jsx_runtime_1.jsx)("span", { className: "warning-icon", children: "\u26A0\uFE0F" }), (0, jsx_runtime_1.jsx)("span", { children: "Deepgram API key required" })] }) })), (0, jsx_runtime_1.jsxs)("div", { className: "status-section", children: [(0, jsx_runtime_1.jsxs)("div", { className: "status-indicator", children: [(0, jsx_runtime_1.jsx)("span", { className: `status-dot ${state}` }), (0, jsx_runtime_1.jsx)("span", { className: "status-text", children: STATUS_TEXT[state] })] }), (0, jsx_runtime_1.jsx)("button", { className: `toggle-button ${isActive ? 'stop' : 'start'}`, onClick: handleToggle, disabled: isTransitioning || !hasApiKey, children: isActive ? ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(StopIcon, {}), " Stop Transcription"] })) : ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(PlayIcon, {}), " Start Transcription"] })) }), error && (0, jsx_runtime_1.jsx)("div", { className: "error-message", children: error })] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-section", children: [(0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsx)("h3", { children: "API Configuration" }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row api-key-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Deepgram API Key" }), (0, jsx_runtime_1.jsxs)("div", { className: "api-key-input-wrapper", children: [(0, jsx_runtime_1.jsx)("input", { type: showApiKey ? 'text' : 'password', value: apiKeyInput, onChange: handleApiKeyChange, placeholder: "Enter your Deepgram API key", className: "api-key-input", disabled: isActive }), (0, jsx_runtime_1.jsx)("button", { className: "api-key-toggle", onClick: () => setShowApiKey(!showApiKey), type: "button", children: showApiKey ? '🙈' : '👁️' })] })] }), apiKeyInput !== settings.deepgramApiKey && ((0, jsx_runtime_1.jsx)("button", { className: "save-api-key-button", onClick: handleApiKeySave, children: "Save API Key" }))] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsx)("h3", { children: "Language" }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Target Language" }), (0, jsx_runtime_1.jsx)("div", { className: "select-wrapper", children: (0, jsx_runtime_1.jsx)("select", { value: settings.language, onChange: (e) => handleLanguageChange(e.target.value), disabled: isActive, children: Object.entries(types_1.LANGUAGE_NAMES).map(([code, name]) => ((0, jsx_runtime_1.jsx)("option", { value: code, children: name }, code))) }) })] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsx)("h3", { children: "Shortcuts" }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Toggle Transcription" }), (0, jsx_runtime_1.jsx)("span", { className: "shortcut-key", children: formatShortcut(settings.toggleShortcut) })] }), (0, jsx_runtime_1.jsxs)("div", { className: "setting-row", children: [(0, jsx_runtime_1.jsx)("span", { className: "setting-label", children: "Show/Hide Overlay" }), (0, jsx_runtime_1.jsx)("span", { className: "shortcut-key", children: formatShortcut(settings.showHideShortcut) })] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "settings-group", children: [(0, jsx_runtime_1.jsxs)("h3", { children: ["Diagnostics", (0, jsx_runtime_1.jsx)("button", { className: "diagnostics-toggle", onClick: () => setShowDiagnostics(!showDiagnostics), style: { marginLeft: '10px', fontSize: '12px' }, children: showDiagnostics ? 'Hide' : 'Show' })] }), showDiagnostics && diagnostics && ((0, jsx_runtime_1.jsxs)("div", { className: "diagnostics-panel", style: { fontSize: '12px', fontFamily: 'monospace' }, children: [(0, jsx_runtime_1.jsxs)("div", { className: "diagnostics-section", children: [(0, jsx_runtime_1.jsx)("strong", { children: "System:" }), (0, jsx_runtime_1.jsxs)("div", { children: ["Platform: ", diagnostics.platform] }), (0, jsx_runtime_1.jsxs)("div", { children: ["State: ", diagnostics.transcriptionState] })] }), (0, jsx_runtime_1.jsxs)("div", { className: "diagnostics-section", style: { marginTop: '10px' }, children: [(0, jsx_runtime_1.jsx)("strong", { children: "Audio Capture:" }), (0, jsx_runtime_1.jsxs)("div", { children: ["Process Running: ", diagnostics.audio.systemAudioProcRunning ? '✓ Yes' : '✗ No'] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Process PID: ", diagnostics.audio.systemAudioProcPid || 'N/A'] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Chunks Received: ", diagnostics.audio.chunksReceived] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Bytes Received: ", (diagnostics.audio.bytesReceived / 1024).toFixed(1), " KB"] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Chunks Sent: ", diagnostics.audio.chunksSentToDeepgram] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Last Chunk: ", diagnostics.audio.lastChunkTime ? new Date(diagnostics.audio.lastChunkTime).toLocaleTimeString() : 'Never'] })] }), diagnostics.deepgram && ((0, jsx_runtime_1.jsxs)("div", { className: "diagnostics-section", style: { marginTop: '10px' }, children: [(0, jsx_runtime_1.jsx)("strong", { children: "Deepgram Connection:" }), (0, jsx_runtime_1.jsxs)("div", { children: ["State:", ' ', (0, jsx_runtime_1.jsx)("span", { style: { color: diagnostics.deepgram.connectionState === 'connected' ? '#4caf50' : diagnostics.deepgram.connectionState === 'error' ? '#f44336' : '#ff9800' }, children: diagnostics.deepgram.connectionState })] }), diagnostics.deepgram.lastError && ((0, jsx_runtime_1.jsxs)("div", { style: { color: '#f44336' }, children: ["Error: ", diagnostics.deepgram.lastError] })), (0, jsx_runtime_1.jsxs)("div", { children: ["Audio Chunks Sent: ", diagnostics.deepgram.audioChunksSent] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Audio Bytes Sent: ", (diagnostics.deepgram.audioBytesSent / 1024).toFixed(1), " KB"] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Transcripts Received: ", diagnostics.deepgram.transcriptsReceived] }), (0, jsx_runtime_1.jsxs)("div", { children: ["KeepAlives Sent: ", diagnostics.deepgram.keepAlivesSent] }), (0, jsx_runtime_1.jsxs)("div", { children: ["Last Transcript: ", diagnostics.deepgram.lastTranscriptTime ? new Date(diagnostics.deepgram.lastTranscriptTime).toLocaleTimeString() : 'Never'] })] })), !diagnostics.deepgram && state === 'active' && ((0, jsx_runtime_1.jsx)("div", { style: { color: '#f44336', marginTop: '10px' }, children: "Warning: No Deepgram service data available" }))] }))] })] }), (0, jsx_runtime_1.jsx)("div", { className: "footer", children: (0, jsx_runtime_1.jsx)("p", { children: "v1.0.0 - Phase 1: Same-Language Subtitles" }) })] }));
 }
 // Helper function to format keyboard shortcuts
 function formatShortcut(shortcut) {
@@ -35781,8 +35814,10 @@ if (container) {
  * Custom hook for capturing system audio
  *
  * Platform-specific implementations:
- * - macOS: Uses native Swift binary (SystemAudioDump) via IPC
+ * - macOS: Uses native Swift binary (SystemAudioDump) via main process
+ *          Audio is streamed directly to Deepgram from main process
  * - Windows: Uses Electron's WASAPI loopback via getDisplayMedia
+ *            Audio chunks are sent to main process for Deepgram streaming
  *
  * Setup required:
  * - macOS: Screen Recording permission + SystemAudioDump binary in assets/
@@ -35791,10 +35826,11 @@ if (container) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.useSystemAudio = useSystemAudio;
 const react_1 = __webpack_require__(/*! react */ "./node_modules/react/index.js");
-// Audio format constants (matching main process)
+// Audio format constants (matching main process and Deepgram config)
 const SAMPLE_RATE = 24000;
 const BUFFER_SIZE = 4096;
-const CHUNK_DURATION_MS = 2000; // Send for transcription every 2 seconds
+// Stream audio in smaller chunks for real-time transcription (100ms)
+const STREAM_INTERVAL_MS = 100;
 function useSystemAudio(options = {}) {
     const { onError } = options;
     const isCapturingRef = (0, react_1.useRef)(false);
@@ -35804,25 +35840,10 @@ function useSystemAudio(options = {}) {
     const audioContextRef = (0, react_1.useRef)(null);
     const processorRef = (0, react_1.useRef)(null);
     const audioBufferRef = (0, react_1.useRef)([]);
-    const sendIntervalRef = (0, react_1.useRef)(null);
-    // macOS audio data listener
-    (0, react_1.useEffect)(() => {
-        const handleMacOSAudioData = async (data) => {
-            if (!isCapturingRef.current || platformRef.current !== 'darwin')
-                return;
-            // macOS sends pre-processed mono 16-bit PCM at 24kHz
-            // Accumulate and send periodically
-            const pcmData = base64ToInt16Array(data.data);
-            audioBufferRef.current.push(pcmData);
-        };
-        window.electronAPI.onSystemAudioData(handleMacOSAudioData);
-        return () => {
-            // Cleanup handled by removeAllListeners
-        };
-    }, []);
-    // Periodically send accumulated audio for transcription
-    const startSendInterval = (0, react_1.useCallback)(() => {
-        sendIntervalRef.current = setInterval(async () => {
+    const streamIntervalRef = (0, react_1.useRef)(null);
+    // Periodically stream accumulated audio to main process (Windows only)
+    const startStreamInterval = (0, react_1.useCallback)(() => {
+        streamIntervalRef.current = setInterval(async () => {
             if (audioBufferRef.current.length === 0)
                 return;
             // Combine all buffered audio
@@ -35834,38 +35855,20 @@ function useSystemAudio(options = {}) {
                 offset += chunk.length;
             }
             audioBufferRef.current = [];
-            // Check for silence (simple VAD)
-            let maxAmp = 0;
-            for (let i = 0; i < combined.length; i++) {
-                const abs = Math.abs(combined[i]);
-                if (abs > maxAmp)
-                    maxAmp = abs;
-            }
-            console.log('Audio max amplitude:', maxAmp, '(16-bit range: 0-32767)');
-            // Skip if too quiet (threshold for 16-bit audio)
-            // 100 is very conservative - should catch most speech
-            if (maxAmp < 100) {
-                console.log('Audio too quiet, skipping');
-                return;
-            }
-            // Convert to base64 and send
+            // Convert to base64 and stream to main process
             const base64Data = int16ArrayToBase64(combined);
-            console.log('Sending audio for transcription, samples:', combined.length);
             try {
-                const result = await window.electronAPI.sendAudioData(base64Data);
-                if (result) {
-                    console.log('Transcription:', result.text);
-                }
+                await window.electronAPI.streamAudioChunk(base64Data);
             }
             catch (error) {
-                console.error('Transcription error:', error);
+                console.error('Error streaming audio:', error);
             }
-        }, CHUNK_DURATION_MS);
+        }, STREAM_INTERVAL_MS);
     }, []);
-    const stopSendInterval = (0, react_1.useCallback)(() => {
-        if (sendIntervalRef.current) {
-            clearInterval(sendIntervalRef.current);
-            sendIntervalRef.current = null;
+    const stopStreamInterval = (0, react_1.useCallback)(() => {
+        if (streamIntervalRef.current) {
+            clearInterval(streamIntervalRef.current);
+            streamIntervalRef.current = null;
         }
         audioBufferRef.current = [];
     }, []);
@@ -35936,24 +35939,25 @@ function useSystemAudio(options = {}) {
             platformRef.current = result.platform || null;
             console.log('Platform:', platformRef.current);
             if (result.platform === 'darwin') {
-                // macOS: Audio comes via IPC from native binary
-                // Just start the send interval
-                console.log('macOS audio capture started via native binary');
+                // macOS: Audio is captured and streamed to Deepgram directly in main process
+                // Nothing to do here in the renderer
+                console.log('macOS audio capture started via native binary (main process handles streaming)');
             }
             else if (result.platform === 'win32') {
-                // Windows: Need to start renderer-side capture
+                // Windows: Need to start renderer-side capture and stream to main process
                 const success = await startWindowsCapture();
                 if (!success) {
                     await window.electronAPI.stopSystemAudio();
                     return false;
                 }
+                // Start streaming audio chunks to main process
+                startStreamInterval();
             }
             else {
                 onError?.('Unsupported platform');
                 return false;
             }
             isCapturingRef.current = true;
-            startSendInterval();
             console.log('System audio capture started');
             return true;
         }
@@ -35962,11 +35966,11 @@ function useSystemAudio(options = {}) {
             onError?.(error instanceof Error ? error.message : 'Failed to start capture');
             return false;
         }
-    }, [onError, startWindowsCapture, startSendInterval]);
+    }, [onError, startWindowsCapture, startStreamInterval]);
     const stopCapture = (0, react_1.useCallback)(() => {
         console.log('Stopping system audio capture...');
         isCapturingRef.current = false;
-        stopSendInterval();
+        stopStreamInterval();
         if (platformRef.current === 'win32') {
             stopWindowsCapture();
         }
@@ -35974,7 +35978,7 @@ function useSystemAudio(options = {}) {
         window.electronAPI.stopSystemAudio();
         platformRef.current = null;
         console.log('System audio capture stopped');
-    }, [stopSendInterval, stopWindowsCapture]);
+    }, [stopStreamInterval, stopWindowsCapture]);
     return { startCapture, stopCapture, isCapturing: isCapturingRef.current };
 }
 // Utility functions
@@ -35985,14 +35989,6 @@ function convertFloat32ToInt16(float32Array) {
         int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
     }
     return int16Array;
-}
-function base64ToInt16Array(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return new Int16Array(bytes.buffer);
 }
 function int16ArrayToBase64(int16Array) {
     const bytes = new Uint8Array(int16Array.buffer);
@@ -36030,7 +36026,7 @@ exports.DEFAULT_OVERLAY_STYLE = {
     displayDuration: 5,
 };
 exports.DEFAULT_SETTINGS = {
-    openaiApiKey: '',
+    deepgramApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
@@ -36070,7 +36066,7 @@ exports.IPC_CHANNELS = {
     START_SYSTEM_AUDIO: 'start-system-audio',
     STOP_SYSTEM_AUDIO: 'stop-system-audio',
     SYSTEM_AUDIO_DATA: 'system-audio-data',
-    SEND_AUDIO_DATA: 'send-audio-data',
+    STREAM_AUDIO_CHUNK: 'stream-audio-chunk', // New: stream audio directly to Deepgram
     // Main -> Overlay
     TRANSCRIPTION_UPDATE: 'transcription-update',
     CLEAR_TRANSCRIPTION: 'clear-transcription',
@@ -36078,6 +36074,8 @@ exports.IPC_CHANNELS = {
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',
+    // Diagnostics
+    GET_DIAGNOSTICS: 'get-diagnostics',
 };
 
 

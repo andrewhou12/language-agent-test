@@ -26,7 +26,7 @@ exports.DEFAULT_OVERLAY_STYLE = {
     displayDuration: 5,
 };
 exports.DEFAULT_SETTINGS = {
-    openaiApiKey: '',
+    deepgramApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
@@ -66,7 +66,7 @@ exports.IPC_CHANNELS = {
     START_SYSTEM_AUDIO: 'start-system-audio',
     STOP_SYSTEM_AUDIO: 'stop-system-audio',
     SYSTEM_AUDIO_DATA: 'system-audio-data',
-    SEND_AUDIO_DATA: 'send-audio-data',
+    STREAM_AUDIO_CHUNK: 'stream-audio-chunk', // New: stream audio directly to Deepgram
     // Main -> Overlay
     TRANSCRIPTION_UPDATE: 'transcription-update',
     CLEAR_TRANSCRIPTION: 'clear-transcription',
@@ -74,6 +74,8 @@ exports.IPC_CHANNELS = {
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',
+    // Diagnostics
+    GET_DIAGNOSTICS: 'get-diagnostics',
 };
 
 
@@ -146,19 +148,17 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     stopTranscription: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.STOP_TRANSCRIPTION),
     // Audio
     getDesktopSources: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_DESKTOP_SOURCES),
-    transcribeAudio: (audioData) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.TRANSCRIBE_AUDIO, audioData),
     // System audio capture
     startSystemAudio: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.START_SYSTEM_AUDIO),
     stopSystemAudio: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.STOP_SYSTEM_AUDIO),
-    sendAudioData: (base64Data) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.SEND_AUDIO_DATA, base64Data),
-    onSystemAudioData: (callback) => {
-        electron_1.ipcRenderer.on(types_1.IPC_CHANNELS.SYSTEM_AUDIO_DATA, (_event, data) => callback(data));
-    },
+    streamAudioChunk: (base64Data) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.STREAM_AUDIO_CHUNK, base64Data),
     // Settings
     getSettings: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_SETTINGS),
     updateSettings: (settings) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.UPDATE_SETTINGS, settings),
     // State
     getState: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_STATE),
+    // Diagnostics
+    getDiagnostics: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_DIAGNOSTICS),
     // Event listeners
     onStateChanged: (callback) => {
         electron_1.ipcRenderer.on(types_1.IPC_CHANNELS.STATE_CHANGED, (_event, state) => callback(state));
@@ -170,7 +170,6 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     removeAllListeners: () => {
         electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.STATE_CHANGED);
         electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.ERROR_OCCURRED);
-        electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.SYSTEM_AUDIO_DATA);
     },
 });
 
