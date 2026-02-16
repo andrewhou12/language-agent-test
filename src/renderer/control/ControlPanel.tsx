@@ -7,6 +7,7 @@ import {
 } from '../../shared/types';
 import type { ControlAPI } from '../../main/preload-control';
 import { useSystemAudio } from './useSystemAudio';
+import { TranscriptHistory } from './TranscriptHistory';
 
 // Declare the electronAPI on window
 declare global {
@@ -53,6 +54,7 @@ export function ControlPanel(): React.ReactElement {
   const [showApiKey, setShowApiKey] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsData | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const stopCaptureRef = useRef<(() => void) | null>(null);
   const diagnosticsIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -236,6 +238,13 @@ export function ControlPanel(): React.ReactElement {
         </button>
 
         {error && <div className="error-message">{error}</div>}
+
+        <button
+          className="history-button"
+          onClick={() => setShowHistory(true)}
+        >
+          <HistoryIcon /> View Transcript History
+        </button>
       </div>
 
       {/* Settings Section */}
@@ -365,6 +374,10 @@ export function ControlPanel(): React.ReactElement {
       <div className="footer">
         <p>v1.0.0 - Phase 1: Same-Language Subtitles</p>
       </div>
+
+      {showHistory && (
+        <TranscriptHistory onClose={() => setShowHistory(false)} />
+      )}
     </div>
   );
 }
@@ -390,6 +403,15 @@ function StopIcon(): React.ReactElement {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
       <rect x="6" y="6" width="12" height="12" />
+    </svg>
+  );
+}
+
+function HistoryIcon(): React.ReactElement {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }

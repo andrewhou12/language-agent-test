@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { AppSettings, TranscriptionState, IPC_CHANNELS } from '../shared/types';
+import { AppSettings, TranscriptionState, SavedTranscript, IPC_CHANNELS } from '../shared/types';
 
 // Define the API exposed to the renderer
 export interface ControlAPI {
@@ -31,6 +31,12 @@ export interface ControlAPI {
 
   // Diagnostics
   getDiagnostics: () => Promise<any>;
+
+  // Transcript history
+  getTranscripts: () => Promise<SavedTranscript[]>;
+  getTranscript: (id: string) => Promise<SavedTranscript | null>;
+  deleteTranscript: (id: string) => Promise<boolean>;
+  exportTranscript: (id: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
 
   // Event listeners
   onStateChanged: (callback: (state: TranscriptionState) => void) => void;
@@ -65,6 +71,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Diagnostics
   getDiagnostics: () => ipcRenderer.invoke(IPC_CHANNELS.GET_DIAGNOSTICS),
+
+  // Transcript history
+  getTranscripts: () => ipcRenderer.invoke(IPC_CHANNELS.GET_TRANSCRIPTS),
+  getTranscript: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_TRANSCRIPT, id),
+  deleteTranscript: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_TRANSCRIPT, id),
+  exportTranscript: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.EXPORT_TRANSCRIPT, id),
 
   // Event listeners
   onStateChanged: (callback: (state: TranscriptionState) => void) => {

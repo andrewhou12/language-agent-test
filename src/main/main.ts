@@ -18,14 +18,17 @@ import {
   DEFAULT_SETTINGS,
   TranscriptionState,
   TranscriptionResult,
+  SavedTranscript,
   IPC_CHANNELS,
 } from '../shared/types';
+import { randomUUID } from 'crypto';
 import { DeepgramTranscription, DiagnosticInfo } from './deepgram-transcription';
 
 // Initialize settings store
-const store = new Store<{ settings: AppSettings }>({
+const store = new Store<{ settings: AppSettings; transcripts: SavedTranscript[] }>({
   defaults: {
     settings: DEFAULT_SETTINGS,
+    transcripts: [],
   },
 });
 
@@ -37,6 +40,10 @@ let tray: Tray | null = null;
 // State
 let transcriptionState: TranscriptionState = 'idle';
 let transcriptionService: DeepgramTranscription | null = null;
+
+// Current session tracking
+let currentSessionStartTime: number | null = null;
+let currentSessionTranscripts: string[] = [];
 
 // macOS system audio capture
 let systemAudioProc: ChildProcess | null = null;
@@ -181,6 +188,40 @@ function setupWindowsLoopbackHandler(): void {
 
 function getSettings(): AppSettings {
   return store.get('settings');
+}
+
+// Transcript storage functions
+function getTranscripts(): SavedTranscript[] {
+  return store.get('transcripts') || [];
+}
+
+function saveTranscript(transcript: SavedTranscript): void {
+  const transcripts = getTranscripts();
+  transcripts.unshift(transcript); // Add to beginning (most recent first)
+  store.set('transcripts', transcripts);
+}
+
+function deleteTranscript(id: string): boolean {
+  const transcripts = getTranscripts();
+  const index = transcripts.findIndex(t => t.id === id);
+  if (index !== -1) {
+    transcripts.splice(index, 1);
+    store.set('transcripts', transcripts);
+    return true;
+  }
+  return false;
+}
+
+function getTranscriptById(id: string): SavedTranscript | null {
+  const transcripts = getTranscripts();
+  return transcripts.find(t => t.id === id) || null;
+}
+
+function generateTranscriptTitle(content: string, language: string): string {
+  const date = new Date();
+  const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  return `${dateStr} at ${timeStr}`;
 }
 
 function updateSettings(newSettings: Partial<AppSettings>): AppSettings {
@@ -355,6 +396,10 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
       lastChunkTime: 0,
     };
 
+    // Initialize session tracking
+    currentSessionStartTime = Date.now();
+    currentSessionTranscripts = [];
+
     // Initialize transcription service
     console.log('[Main] Creating DeepgramTranscription service...');
     transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language);
@@ -365,6 +410,10 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
       onTranscript: (result) => {
         console.log('[Main] Received transcript, sending to overlay:', result.text);
         sendTranscriptionToOverlay(result);
+        // Track final transcripts for saving
+        if (result.isFinal && result.text.trim()) {
+          currentSessionTranscripts.push(result.text.trim());
+        }
       },
       onError: (error) => {
         console.error('[Main] Deepgram error callback:', error.message);
@@ -411,6 +460,33 @@ async function stopTranscription(): Promise<{ success: boolean }> {
       await transcriptionService.stop();
       transcriptionService = null;
     }
+
+    // Save transcript if we have content
+    if (currentSessionTranscripts.length > 0 && currentSessionStartTime) {
+      const settings = getSettings();
+      const endTime = Date.now();
+      const content = currentSessionTranscripts.join(' ');
+      const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+
+      const transcript: SavedTranscript = {
+        id: randomUUID(),
+        title: generateTranscriptTitle(content, settings.language),
+        content,
+        language: settings.language,
+        startTime: currentSessionStartTime,
+        endTime,
+        duration: Math.round((endTime - currentSessionStartTime) / 1000),
+        wordCount,
+        createdAt: Date.now(),
+      };
+
+      saveTranscript(transcript);
+      console.log('[Main] Saved transcript:', transcript.id, 'with', wordCount, 'words');
+    }
+
+    // Reset session tracking
+    currentSessionStartTime = null;
+    currentSessionTranscripts = [];
 
     // Hide overlay
     overlayWindow?.hide();
@@ -523,6 +599,71 @@ function setupIpcHandlers(): void {
       },
     };
   });
+
+  // Transcript history handlers
+  ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPTS, () => {
+    return getTranscripts();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPT, (_, id: string) => {
+    return getTranscriptById(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DELETE_TRANSCRIPT, (_, id: string) => {
+    return deleteTranscript(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_TRANSCRIPT, async (_, id: string) => {
+    const transcript = getTranscriptById(id);
+    if (!transcript) return { success: false, error: 'Transcript not found' };
+
+    const { dialog } = require('electron');
+    const fs = require('fs');
+
+    const result = await dialog.showSaveDialog(controlWindow!, {
+      defaultPath: `transcript-${transcript.id.slice(0, 8)}.txt`,
+      filters: [
+        { name: 'Text Files', extensions: ['txt'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: 'Export cancelled' };
+    }
+
+    try {
+      const exportContent = [
+        `Transcript: ${transcript.title}`,
+        `Date: ${new Date(transcript.createdAt).toLocaleString()}`,
+        `Duration: ${formatDuration(transcript.duration)}`,
+        `Word Count: ${transcript.wordCount}`,
+        `Language: ${transcript.language}`,
+        '',
+        '---',
+        '',
+        transcript.content,
+      ].join('\n');
+
+      fs.writeFileSync(result.filePath, exportContent, 'utf-8');
+      return { success: true, filePath: result.filePath };
+    } catch (error) {
+      return { success: false, error: 'Failed to write file' };
+    }
+  });
+}
+
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${secs}s`;
+  }
+  return `${secs}s`;
 }
 
 // App lifecycle

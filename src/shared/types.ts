@@ -23,6 +23,18 @@ export interface TranscriptionResult {
   speechFinal?: boolean;  // Whether the speaker has finished this utterance
 }
 
+export interface SavedTranscript {
+  id: string;
+  title: string;
+  content: string;
+  language: SupportedLanguage;
+  startTime: number;      // Unix timestamp when session started
+  endTime: number;        // Unix timestamp when session ended
+  duration: number;       // Duration in seconds
+  wordCount: number;
+  createdAt: number;      // Unix timestamp
+}
+
 export interface OverlayPosition {
   x: number;
   y: number;
@@ -141,4 +153,10 @@ export const IPC_CHANNELS = {
 
   // Diagnostics
   GET_DIAGNOSTICS: 'get-diagnostics',
+
+  // Transcript history
+  GET_TRANSCRIPTS: 'get-transcripts',
+  GET_TRANSCRIPT: 'get-transcript',
+  DELETE_TRANSCRIPT: 'delete-transcript',
+  EXPORT_TRANSCRIPT: 'export-transcript',
 } as const;

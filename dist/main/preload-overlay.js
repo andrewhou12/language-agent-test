@@ -76,6 +76,11 @@ exports.IPC_CHANNELS = {
     ERROR_OCCURRED: 'error-occurred',
     // Diagnostics
     GET_DIAGNOSTICS: 'get-diagnostics',
+    // Transcript history
+    GET_TRANSCRIPTS: 'get-transcripts',
+    GET_TRANSCRIPT: 'get-transcript',
+    DELETE_TRANSCRIPT: 'delete-transcript',
+    EXPORT_TRANSCRIPT: 'export-transcript',
 };
 
 

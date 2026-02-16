@@ -4681,11 +4681,13 @@ const child_process_1 = __webpack_require__(/*! child_process */ "child_process"
 const path = __importStar(__webpack_require__(/*! path */ "path"));
 const electron_store_1 = __importDefault(__webpack_require__(/*! electron-store */ "electron-store"));
 const types_1 = __webpack_require__(/*! ../shared/types */ "./src/shared/types.ts");
+const crypto_1 = __webpack_require__(/*! crypto */ "crypto");
 const deepgram_transcription_1 = __webpack_require__(/*! ./deepgram-transcription */ "./src/main/deepgram-transcription.ts");
 // Initialize settings store
 const store = new electron_store_1.default({
     defaults: {
         settings: types_1.DEFAULT_SETTINGS,
+        transcripts: [],
     },
 });
 // Window references
@@ -4695,6 +4697,9 @@ let tray = null;
 // State
 let transcriptionState = 'idle';
 let transcriptionService = null;
+// Current session tracking
+let currentSessionStartTime = null;
+let currentSessionTranscripts = [];
 // macOS system audio capture
 let systemAudioProc = null;
 // Audio diagnostics
@@ -4815,6 +4820,35 @@ function setupWindowsLoopbackHandler() {
 }
 function getSettings() {
     return store.get('settings');
+}
+// Transcript storage functions
+function getTranscripts() {
+    return store.get('transcripts') || [];
+}
+function saveTranscript(transcript) {
+    const transcripts = getTranscripts();
+    transcripts.unshift(transcript); // Add to beginning (most recent first)
+    store.set('transcripts', transcripts);
+}
+function deleteTranscript(id) {
+    const transcripts = getTranscripts();
+    const index = transcripts.findIndex(t => t.id === id);
+    if (index !== -1) {
+        transcripts.splice(index, 1);
+        store.set('transcripts', transcripts);
+        return true;
+    }
+    return false;
+}
+function getTranscriptById(id) {
+    const transcripts = getTranscripts();
+    return transcripts.find(t => t.id === id) || null;
+}
+function generateTranscriptTitle(content, language) {
+    const date = new Date();
+    const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return `${dateStr} at ${timeStr}`;
 }
 function updateSettings(newSettings) {
     const current = getSettings();
@@ -4964,6 +4998,9 @@ async function startTranscription() {
             chunksSentToDeepgram: 0,
             lastChunkTime: 0,
         };
+        // Initialize session tracking
+        currentSessionStartTime = Date.now();
+        currentSessionTranscripts = [];
         // Initialize transcription service
         console.log('[Main] Creating DeepgramTranscription service...');
         transcriptionService = new deepgram_transcription_1.DeepgramTranscription(settings.deepgramApiKey, settings.language);
@@ -4973,6 +5010,10 @@ async function startTranscription() {
             onTranscript: (result) => {
                 console.log('[Main] Received transcript, sending to overlay:', result.text);
                 sendTranscriptionToOverlay(result);
+                // Track final transcripts for saving
+                if (result.isFinal && result.text.trim()) {
+                    currentSessionTranscripts.push(result.text.trim());
+                }
             },
             onError: (error) => {
                 console.error('[Main] Deepgram error callback:', error.message);
@@ -5014,6 +5055,29 @@ async function stopTranscription() {
             await transcriptionService.stop();
             transcriptionService = null;
         }
+        // Save transcript if we have content
+        if (currentSessionTranscripts.length > 0 && currentSessionStartTime) {
+            const settings = getSettings();
+            const endTime = Date.now();
+            const content = currentSessionTranscripts.join(' ');
+            const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+            const transcript = {
+                id: (0, crypto_1.randomUUID)(),
+                title: generateTranscriptTitle(content, settings.language),
+                content,
+                language: settings.language,
+                startTime: currentSessionStartTime,
+                endTime,
+                duration: Math.round((endTime - currentSessionStartTime) / 1000),
+                wordCount,
+                createdAt: Date.now(),
+            };
+            saveTranscript(transcript);
+            console.log('[Main] Saved transcript:', transcript.id, 'with', wordCount, 'words');
+        }
+        // Reset session tracking
+        currentSessionStartTime = null;
+        currentSessionTranscripts = [];
         // Hide overlay
         overlayWindow?.hide();
         // Clear overlay
@@ -5112,6 +5176,63 @@ function setupIpcHandlers() {
             },
         };
     });
+    // Transcript history handlers
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.GET_TRANSCRIPTS, () => {
+        return getTranscripts();
+    });
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.GET_TRANSCRIPT, (_, id) => {
+        return getTranscriptById(id);
+    });
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.DELETE_TRANSCRIPT, (_, id) => {
+        return deleteTranscript(id);
+    });
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.EXPORT_TRANSCRIPT, async (_, id) => {
+        const transcript = getTranscriptById(id);
+        if (!transcript)
+            return { success: false, error: 'Transcript not found' };
+        const { dialog } = __webpack_require__(/*! electron */ "electron");
+        const fs = __webpack_require__(/*! fs */ "fs");
+        const result = await dialog.showSaveDialog(controlWindow, {
+            defaultPath: `transcript-${transcript.id.slice(0, 8)}.txt`,
+            filters: [
+                { name: 'Text Files', extensions: ['txt'] },
+                { name: 'All Files', extensions: ['*'] },
+            ],
+        });
+        if (result.canceled || !result.filePath) {
+            return { success: false, error: 'Export cancelled' };
+        }
+        try {
+            const exportContent = [
+                `Transcript: ${transcript.title}`,
+                `Date: ${new Date(transcript.createdAt).toLocaleString()}`,
+                `Duration: ${formatDuration(transcript.duration)}`,
+                `Word Count: ${transcript.wordCount}`,
+                `Language: ${transcript.language}`,
+                '',
+                '---',
+                '',
+                transcript.content,
+            ].join('\n');
+            fs.writeFileSync(result.filePath, exportContent, 'utf-8');
+            return { success: true, filePath: result.filePath };
+        }
+        catch (error) {
+            return { success: false, error: 'Failed to write file' };
+        }
+    });
+}
+function formatDuration(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    }
+    else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    }
+    return `${secs}s`;
 }
 // App lifecycle
 electron_1.app.whenReady().then(() => {
@@ -5221,6 +5342,11 @@ exports.IPC_CHANNELS = {
     ERROR_OCCURRED: 'error-occurred',
     // Diagnostics
     GET_DIAGNOSTICS: 'get-diagnostics',
+    // Transcript history
+    GET_TRANSCRIPTS: 'get-transcripts',
+    GET_TRANSCRIPT: 'get-transcript',
+    DELETE_TRANSCRIPT: 'delete-transcript',
+    EXPORT_TRANSCRIPT: 'export-transcript',
 };
 
 

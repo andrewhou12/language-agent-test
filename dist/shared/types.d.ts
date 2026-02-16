@@ -9,6 +9,17 @@ export interface TranscriptionResult {
     isFinal?: boolean;
     speechFinal?: boolean;
 }
+export interface SavedTranscript {
+    id: string;
+    title: string;
+    content: string;
+    language: SupportedLanguage;
+    startTime: number;
+    endTime: number;
+    duration: number;
+    wordCount: number;
+    createdAt: number;
+}
 export interface OverlayPosition {
     x: number;
     y: number;
@@ -70,5 +81,9 @@ export declare const IPC_CHANNELS: {
     readonly STATE_CHANGED: "state-changed";
     readonly ERROR_OCCURRED: "error-occurred";
     readonly GET_DIAGNOSTICS: "get-diagnostics";
+    readonly GET_TRANSCRIPTS: "get-transcripts";
+    readonly GET_TRANSCRIPT: "get-transcript";
+    readonly DELETE_TRANSCRIPT: "delete-transcript";
+    readonly EXPORT_TRANSCRIPT: "export-transcript";
 };
 //# sourceMappingURL=types.d.ts.map

@@ -76,6 +76,11 @@ exports.IPC_CHANNELS = {
     ERROR_OCCURRED: 'error-occurred',
     // Diagnostics
     GET_DIAGNOSTICS: 'get-diagnostics',
+    // Transcript history
+    GET_TRANSCRIPTS: 'get-transcripts',
+    GET_TRANSCRIPT: 'get-transcript',
+    DELETE_TRANSCRIPT: 'delete-transcript',
+    EXPORT_TRANSCRIPT: 'export-transcript',
 };
 
 
@@ -159,6 +164,11 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     getState: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_STATE),
     // Diagnostics
     getDiagnostics: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_DIAGNOSTICS),
+    // Transcript history
+    getTranscripts: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_TRANSCRIPTS),
+    getTranscript: (id) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_TRANSCRIPT, id),
+    deleteTranscript: (id) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.DELETE_TRANSCRIPT, id),
+    exportTranscript: (id) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.EXPORT_TRANSCRIPT, id),
     // Event listeners
     onStateChanged: (callback) => {
         electron_1.ipcRenderer.on(types_1.IPC_CHANNELS.STATE_CHANGED, (_event, state) => callback(state));
