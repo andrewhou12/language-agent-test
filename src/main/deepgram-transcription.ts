@@ -97,7 +97,7 @@ export class DeepgramTranscription {
       model: 'nova-3',
       language: languageCode,
       encoding: 'linear16',
-      sample_rate: 24000,
+      sample_rate: 16000,  // Match Deepgram example app (16kHz optimal)
       channels: 1,
     });
 
@@ -105,14 +105,15 @@ export class DeepgramTranscription {
       this.connection = deepgram.listen.live({
         model: 'nova-3',
         language: languageCode,
-        smart_format: true,
-        punctuate: true,
+        // Disabled for lower latency - these add processing overhead
+        smart_format: false,
+        punctuate: false,
         interim_results: true,
-        utterance_end_ms: 1000,    // Wait 1s of silence before utterance end (better for pauses)
-        endpointing: 500,          // Increased from 300ms to 500ms
-        vad_events: true,          // Voice activity detection events
+        // Aggressive endpointing for real-time subtitles
+        endpointing: 100,
+        vad_events: false,
         encoding: 'linear16',
-        sample_rate: 24000,
+        sample_rate: 16000,
         channels: 1,
       });
     } catch (error) {
@@ -155,16 +156,28 @@ export class DeepgramTranscription {
         console.log('[Deepgram] Received metadata:', JSON.stringify(data, null, 2));
       });
 
-      this.connection.on(LiveTranscriptionEvents.Error, (error) => {
-        const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
-        console.error('[Deepgram] ✗ ERROR:', errorMsg);
+      this.connection.on(LiveTranscriptionEvents.Error, (error: any) => {
+        // Log full error details for debugging
+        console.error('[Deepgram] ✗ ERROR - Full object:', error);
+        console.error('[Deepgram] ✗ ERROR - Type:', typeof error);
+        console.error('[Deepgram] ✗ ERROR - Keys:', error ? Object.keys(error) : 'null');
+        if (error?.message) console.error('[Deepgram] ✗ ERROR - Message:', error.message);
+        if (error?.code) console.error('[Deepgram] ✗ ERROR - Code:', error.code);
+        if (error?.error) console.error('[Deepgram] ✗ ERROR - Inner error:', error.error);
+
+        const errorMsg = error instanceof Error
+          ? error.message
+          : (error?.message || error?.error || JSON.stringify(error) || 'Unknown error');
         this.diagnostics.lastError = errorMsg;
         this.diagnostics.connectionState = 'error';
         this.callbacks?.onError(error instanceof Error ? error : new Error(errorMsg));
       });
 
-      this.connection.on(LiveTranscriptionEvents.Close, () => {
+      this.connection.on(LiveTranscriptionEvents.Close, (event: any) => {
         console.log('[Deepgram] WebSocket CLOSED');
+        console.log('[Deepgram] Close event:', event);
+        if (event?.code) console.log('[Deepgram] Close code:', event.code);
+        if (event?.reason) console.log('[Deepgram] Close reason:', event.reason);
         this.isConnected = false;
         this.diagnostics.connectionState = 'disconnected';
         this.stopKeepAlive();
