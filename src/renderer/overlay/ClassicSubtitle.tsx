@@ -2,154 +2,219 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   TranscriptionResult,
   OverlayStyle,
-  DEFAULT_OVERLAY_STYLE,
 } from '../../shared/types';
-import type { OverlayAPI } from '../../main/preload-overlay';
 
-const electronAPI = (window as unknown as { electronAPI: OverlayAPI }).electronAPI;
-
-interface TranscriptSegment {
+interface SubtitleEntry {
   id: number;
   text: string;
   timestamp: number;
+  isFadingOut: boolean;
   isFinal: boolean;
 }
 
-const MAX_DISPLAY_TIME = 8000; // 8 seconds max display
-const FADE_DURATION = 500;
+interface ClassicSubtitleProps {
+  style: OverlayStyle;
+  registerHandlers: (
+    onTranscription: (result: TranscriptionResult) => void,
+    onClear: () => void
+  ) => void;
+}
 
-export function ClassicSubtitle(): React.ReactElement {
-  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
-  const [style, setStyle] = useState<OverlayStyle>(DEFAULT_OVERLAY_STYLE);
-  const [isVisible, setIsVisible] = useState(true);
-
+export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProps): React.ReactElement {
+  const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
+  const [isListening, setIsListening] = useState(true);
   const nextIdRef = useRef(0);
-  const cleanupTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const fadeOutTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
 
-  // Cleanup old segments
-  useEffect(() => {
-    cleanupTimerRef.current = setInterval(() => {
-      const now = Date.now();
-      setSegments((prev) =>
-        prev.filter((s) => now - s.timestamp < MAX_DISPLAY_TIME)
-      );
-    }, 1000);
-
-    return () => {
-      if (cleanupTimerRef.current) {
-        clearInterval(cleanupTimerRef.current);
-      }
-    };
+  // Clear a subtitle after fade-out completes
+  const removeSubtitle = useCallback((id: number) => {
+    setSubtitles((prev) => prev.filter((s) => s.id !== id));
+    fadeOutTimersRef.current.delete(id);
   }, []);
+
+  // Start fade-out animation for a subtitle
+  const startFadeOut = useCallback(
+    (id: number) => {
+      setSubtitles((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, isFadingOut: true } : s))
+      );
+
+      // Remove after fade-out animation (500ms as defined in CSS)
+      setTimeout(() => removeSubtitle(id), 500);
+    },
+    [removeSubtitle]
+  );
+
+  // Schedule a subtitle to fade out after displayDuration
+  const scheduleRemoval = useCallback(
+    (id: number, displayDuration: number) => {
+      const timer = setTimeout(() => {
+        startFadeOut(id);
+      }, displayDuration * 1000);
+
+      fadeOutTimersRef.current.set(id, timer);
+    },
+    [startFadeOut]
+  );
 
   // Handle incoming transcription
-  const handleTranscription = useCallback((result: TranscriptionResult) => {
-    setSegments((prev) => {
-      // Find existing interim segment
-      const interimIndex = prev.findIndex((s) => !s.isFinal);
+  const handleTranscription = useCallback(
+    (result: TranscriptionResult) => {
+      setSubtitles((prev) => {
+        // Find the last non-final entry (current interim)
+        const lastInterimIndex = prev.findIndex((s) => !s.isFinal && !s.isFadingOut);
 
-      if (result.isFinal) {
-        // Replace interim with final, or add new final
-        if (interimIndex !== -1) {
-          const updated = [...prev];
-          updated[interimIndex] = {
-            ...updated[interimIndex],
-            text: result.text,
-            isFinal: true,
-            timestamp: Date.now(),
-          };
-          return updated;
-        } else {
-          return [
-            ...prev,
-            {
-              id: nextIdRef.current++,
+        if (result.isFinal) {
+          // Final result: replace any interim with this final version
+          if (lastInterimIndex !== -1) {
+            // Replace interim with final
+            const updated = [...prev];
+            updated[lastInterimIndex] = {
+              ...updated[lastInterimIndex],
               text: result.text,
-              timestamp: Date.now(),
               isFinal: true,
-            },
-          ].slice(-3); // Keep last 3 segments
-        }
-      } else {
-        // Update or add interim
-        if (interimIndex !== -1) {
-          const updated = [...prev];
-          updated[interimIndex] = {
-            ...updated[interimIndex],
-            text: result.text,
-            timestamp: Date.now(),
-          };
-          return updated;
-        } else {
-          return [
-            ...prev,
-            {
-              id: nextIdRef.current++,
+            };
+            // Schedule fade-out for the now-final entry
+            scheduleRemoval(updated[lastInterimIndex].id, style.displayDuration);
+            return updated;
+          } else {
+            // No interim to replace, add as new final entry
+            const id = nextIdRef.current++;
+            const newEntry: SubtitleEntry = {
+              id,
               text: result.text,
-              timestamp: Date.now(),
+              timestamp: result.timestamp,
+              isFadingOut: false,
+              isFinal: true,
+            };
+            scheduleRemoval(id, style.displayDuration);
+            const maxToKeep = style.maxLines;
+            const kept = prev.slice(-(maxToKeep - 1));
+            return [...kept, newEntry];
+          }
+        } else {
+          // Interim result: update existing interim or create new one
+          if (lastInterimIndex !== -1) {
+            // Update existing interim in place
+            const updated = [...prev];
+            updated[lastInterimIndex] = {
+              ...updated[lastInterimIndex],
+              text: result.text,
+            };
+            return updated;
+          } else {
+            // Create new interim entry
+            const id = nextIdRef.current++;
+            const newEntry: SubtitleEntry = {
+              id,
+              text: result.text,
+              timestamp: result.timestamp,
+              isFadingOut: false,
               isFinal: false,
-            },
-          ].slice(-3);
+            };
+            const maxToKeep = style.maxLines;
+            const kept = prev.slice(-(maxToKeep - 1));
+            return [...kept, newEntry];
+          }
         }
-      }
-    });
-  }, []);
+      });
 
-  // Handle clear
+      setIsListening(true);
+    },
+    [style.maxLines, style.displayDuration, scheduleRemoval]
+  );
+
+  // Handle clear transcription command
   const handleClear = useCallback(() => {
-    setSegments([]);
+    // Clear all timers
+    fadeOutTimersRef.current.forEach((timer) => clearTimeout(timer));
+    fadeOutTimersRef.current.clear();
+
+    // Clear all subtitles
+    setSubtitles([]);
+    setIsListening(false);
   }, []);
 
-  // Handle style updates
-  const handleStyleUpdate = useCallback((newStyle: OverlayStyle) => {
-    setStyle(newStyle);
-  }, []);
-
-  // Set up IPC listeners
+  // Register handlers with parent
   useEffect(() => {
-    electronAPI.onTranscriptionUpdate(handleTranscription);
-    electronAPI.onClearTranscription(handleClear);
-    electronAPI.onStyleUpdate(handleStyleUpdate);
+    registerHandlers(handleTranscription, handleClear);
+  }, [registerHandlers, handleTranscription, handleClear]);
 
+  // Clean up timers on unmount
+  useEffect(() => {
     return () => {
-      electronAPI.removeAllListeners();
+      fadeOutTimersRef.current.forEach((timer) => clearTimeout(timer));
     };
-  }, [handleTranscription, handleClear, handleStyleUpdate]);
+  }, []);
+
+  // Generate dynamic styles based on settings
+  const containerStyle: React.CSSProperties = {
+    fontFamily: style.fontFamily,
+    fontSize: `${style.fontSize}px`,
+    fontWeight: style.fontWeight,
+    color: style.textColor,
+  };
+
+  const lineStyle: React.CSSProperties = {
+    backgroundColor: `rgba(${hexToRgb(style.backgroundColor)}, ${style.backgroundOpacity})`,
+  };
+
+  // Determine position class
+  const positionClass = `position-${style.position}`;
 
   // Determine language class for CJK fonts
   const getLangClass = (text: string): string => {
-    if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return 'lang-cjk';
-    if (/[\uAC00-\uD7AF]/.test(text)) return 'lang-cjk';
-    if (/[\u4E00-\u9FFF]/.test(text)) return 'lang-cjk';
+    // Check for CJK characters
+    if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text)) {
+      return 'lang-ja';
+    }
+    if (/[\uAC00-\uD7AF]/.test(text)) {
+      return 'lang-ko';
+    }
+    if (/[\u4E00-\u9FFF]/.test(text)) {
+      return 'lang-zh';
+    }
     return '';
   };
 
-  // Get combined text from recent segments
-  const displayText = segments
-    .map((s) => s.text)
-    .join(' ')
-    .trim();
-
-  if (!displayText) {
-    return <div className="classic-container" />;
-  }
-
-  const hasInterim = segments.some((s) => !s.isFinal);
-
   return (
-    <div className="classic-container">
-      <div
-        className="classic-subtitle"
-        style={{
-          fontFamily: style.fontFamily,
-          fontSize: `${style.fontSize}px`,
-          fontWeight: style.fontWeight,
-        }}
-      >
-        <span className={`subtitle-text ${hasInterim ? 'has-interim' : ''} ${getLangClass(displayText)}`}>
-          {displayText}
-        </span>
+    <div
+      className={`subtitle-overlay ${positionClass}`}
+      style={containerStyle}
+    >
+      <div className="subtitle-container">
+        {subtitles.length === 0 && isListening && (
+          <div className="status-indicator">
+            <span className="status-dot" />
+            <span>Listening...</span>
+          </div>
+        )}
+
+        {subtitles.map((subtitle) => (
+          <div
+            key={subtitle.id}
+            className={`subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${
+              style.textShadow ? 'text-shadow' : ''
+            } ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`}
+            style={lineStyle}
+          >
+            {subtitle.text}
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+// Helper function to convert hex color to RGB
+function hexToRgb(hex: string): string {
+  // Remove # if present
+  const cleanHex = hex.replace('#', '');
+
+  // Parse hex values
+  const r = parseInt(cleanHex.substring(0, 2), 16);
+  const g = parseInt(cleanHex.substring(2, 4), 16);
+  const b = parseInt(cleanHex.substring(4, 6), 16);
+
+  return `${r}, ${g}, ${b}`;
 }

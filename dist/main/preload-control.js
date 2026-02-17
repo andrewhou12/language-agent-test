@@ -31,9 +31,9 @@ exports.DEFAULT_OVERLAY_STYLE = {
 };
 exports.DEFAULT_BUBBLE_STATE = {
     x: -1, // -1 means center
-    y: -1,
-    width: 400,
-    height: 250,
+    y: -1, // -1 means lower-center (75% down screen)
+    width: 320,
+    height: 80,
     collapsed: false,
 };
 exports.DEFAULT_SETTINGS = {

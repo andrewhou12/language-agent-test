@@ -120,9 +120,9 @@ export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
 
 export const DEFAULT_BUBBLE_STATE: BubbleState = {
   x: -1,  // -1 means center
-  y: -1,
-  width: 400,
-  height: 250,
+  y: -1,  // -1 means lower-center (75% down screen)
+  width: 320,
+  height: 80,
   collapsed: false,
 };
 

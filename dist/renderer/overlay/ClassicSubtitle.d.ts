@@ -1,3 +1,9 @@
 import React from 'react';
-export declare function ClassicSubtitle(): React.ReactElement;
+import { TranscriptionResult, OverlayStyle } from '../../shared/types';
+interface ClassicSubtitleProps {
+    style: OverlayStyle;
+    registerHandlers: (onTranscription: (result: TranscriptionResult) => void, onClear: () => void) => void;
+}
+export declare function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProps): React.ReactElement;
+export {};
 //# sourceMappingURL=ClassicSubtitle.d.ts.map

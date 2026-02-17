@@ -5320,15 +5320,34 @@ function createOverlayWindow() {
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
     const settings = getSettings();
     const bubbleState = settings.bubbleState || types_1.DEFAULT_BUBBLE_STATE;
-    // Calculate position (center if -1)
-    const windowWidth = bubbleState.width;
-    const windowHeight = bubbleState.height;
-    const windowX = bubbleState.x === -1
-        ? Math.floor((screenWidth - windowWidth) / 2)
-        : bubbleState.x;
-    const windowY = bubbleState.y === -1
-        ? Math.floor((screenHeight - windowHeight) / 2)
-        : bubbleState.y;
+    const overlayMode = settings.overlayMode || 'bubble';
+    // Determine window dimensions based on overlay mode
+    let windowWidth;
+    let windowHeight;
+    let windowX;
+    let windowY;
+    let isResizable;
+    if (overlayMode === 'subtitle') {
+        // Classic subtitle: fullscreen, CSS handles positioning
+        windowWidth = screenWidth;
+        windowHeight = screenHeight;
+        windowX = 0;
+        windowY = 0;
+        isResizable = false;
+    }
+    else {
+        // Bubble mode: use saved bubble state
+        windowWidth = bubbleState.width;
+        windowHeight = bubbleState.height;
+        windowX = bubbleState.x === -1
+            ? Math.floor((screenWidth - windowWidth) / 2)
+            : bubbleState.x;
+        // Position lower on screen (like classic captions)
+        windowY = bubbleState.y === -1
+            ? Math.floor(screenHeight * 0.85 - windowHeight)
+            : bubbleState.y;
+        isResizable = true;
+    }
     overlayWindow = new electron_1.BrowserWindow({
         width: windowWidth,
         height: windowHeight,
@@ -5342,8 +5361,8 @@ function createOverlayWindow() {
         skipTaskbar: true,
         focusable: true, // Allow focus for interaction
         hasShadow: false,
-        resizable: true, // Enable resize
-        movable: true, // Enable move (via -webkit-app-region: drag)
+        resizable: isResizable,
+        movable: overlayMode === 'bubble',
         show: false, // Don't show on creation
         backgroundColor: '#00000000', // Fully transparent background
         webPreferences: {
@@ -5353,11 +5372,13 @@ function createOverlayWindow() {
         },
     });
     overlayWindow.loadFile(path.join(__dirname, '../renderer/overlay/index.html'));
-    // Don't ignore mouse events - we need interaction for dragging/resizing
-    // The CSS will handle which areas are draggable
+    // Set mouse event handling based on mode
+    if (overlayMode === 'subtitle') {
+        overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
     // Set window level to float above other windows
     overlayWindow.setAlwaysOnTop(true, 'floating');
-    // Save position/size when window moves or resizes
+    // Save position/size when window moves or resizes (only relevant for bubble mode)
     overlayWindow.on('moved', () => {
         saveBubblePosition();
     });
@@ -5371,8 +5392,11 @@ function createOverlayWindow() {
 function saveBubblePosition() {
     if (!overlayWindow)
         return;
-    const bounds = overlayWindow.getBounds();
+    // Only save position when in bubble mode, not when fullscreen in subtitle mode
     const settings = getSettings();
+    if (settings.overlayMode !== 'bubble')
+        return;
+    const bounds = overlayWindow.getBounds();
     const updatedBubbleState = {
         ...settings.bubbleState,
         x: bounds.x,
@@ -5628,6 +5652,39 @@ function setupIpcHandlers() {
         if (newSettings.overlayStyle) {
             overlayWindow?.webContents.send(types_1.IPC_CHANNELS.UPDATE_OVERLAY_STYLE, updated.overlayStyle);
         }
+        // Update overlay mode if changed
+        if (newSettings.overlayMode && overlayWindow) {
+            const mode = newSettings.overlayMode;
+            overlayWindow.webContents.send(types_1.IPC_CHANNELS.SET_OVERLAY_MODE, mode);
+            // Adjust window behavior based on mode
+            if (mode === 'subtitle') {
+                // Classic subtitle: fullscreen window, CSS handles positioning
+                const primaryDisplay = electron_1.screen.getPrimaryDisplay();
+                const { width, height } = primaryDisplay.workAreaSize;
+                overlayWindow.setSize(width, height);
+                overlayWindow.setPosition(0, 0);
+                overlayWindow.setResizable(false);
+                overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+            }
+            else {
+                // Bubble mode: restore bubble state
+                const bubbleState = updated.bubbleState || types_1.DEFAULT_BUBBLE_STATE;
+                overlayWindow.setSize(bubbleState.width, bubbleState.height);
+                overlayWindow.setResizable(true);
+                overlayWindow.setIgnoreMouseEvents(false);
+                // Position centered-lower if not set, otherwise use saved position
+                if (bubbleState.x === -1 || bubbleState.y === -1) {
+                    const primaryDisplay = electron_1.screen.getPrimaryDisplay();
+                    const { width: sw, height: sh } = primaryDisplay.workAreaSize;
+                    const x = Math.floor((sw - bubbleState.width) / 2);
+                    const y = Math.floor(sh * 0.85 - bubbleState.height);
+                    overlayWindow.setPosition(x, y);
+                }
+                else {
+                    overlayWindow.setPosition(bubbleState.x, bubbleState.y);
+                }
+            }
+        }
         return updated;
     });
     electron_1.ipcMain.handle(types_1.IPC_CHANNELS.GET_STATE, () => {
@@ -5787,11 +5844,11 @@ function setupIpcHandlers() {
             overlayWindow.webContents.send(types_1.IPC_CHANNELS.SET_OVERLAY_MODE, mode);
             // Adjust window behavior based on mode
             if (mode === 'subtitle') {
-                // Classic subtitle: fixed at bottom, full width, not draggable
+                // Classic subtitle: fullscreen window, CSS handles positioning
                 const primaryDisplay = electron_1.screen.getPrimaryDisplay();
-                const { width } = primaryDisplay.workAreaSize;
-                overlayWindow.setSize(width, 120);
-                overlayWindow.setPosition(0, primaryDisplay.workAreaSize.height - 120);
+                const { width, height } = primaryDisplay.workAreaSize;
+                overlayWindow.setSize(width, height);
+                overlayWindow.setPosition(0, 0);
                 overlayWindow.setResizable(false);
                 overlayWindow.setIgnoreMouseEvents(true, { forward: true });
             }
@@ -5801,9 +5858,13 @@ function setupIpcHandlers() {
                 overlayWindow.setSize(bubbleState.width, bubbleState.height);
                 overlayWindow.setResizable(true);
                 overlayWindow.setIgnoreMouseEvents(false);
-                // Center if position not set
+                // Position centered-lower if not set, otherwise use saved position
                 if (bubbleState.x === -1 || bubbleState.y === -1) {
-                    overlayWindow.center();
+                    const primaryDisplay = electron_1.screen.getPrimaryDisplay();
+                    const { width: sw, height: sh } = primaryDisplay.workAreaSize;
+                    const x = Math.floor((sw - bubbleState.width) / 2);
+                    const y = Math.floor(sh * 0.85 - bubbleState.height);
+                    overlayWindow.setPosition(x, y);
                 }
                 else {
                     overlayWindow.setPosition(bubbleState.x, bubbleState.y);
@@ -5888,9 +5949,9 @@ exports.DEFAULT_OVERLAY_STYLE = {
 };
 exports.DEFAULT_BUBBLE_STATE = {
     x: -1, // -1 means center
-    y: -1,
-    width: 400,
-    height: 250,
+    y: -1, // -1 means lower-center (75% down screen)
+    width: 320,
+    height: 80,
     collapsed: false,
 };
 exports.DEFAULT_SETTINGS = {
