@@ -64,12 +64,15 @@ const CHUNK_DURATION = 0.1; // 100ms chunks
 const CHUNK_SIZE = SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 
 function convertStereoToMono(stereoBuffer: Buffer): Buffer {
-  const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair
+  const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair (2 bytes per channel)
   const monoBuffer = Buffer.alloc(samples * 2);
 
   for (let i = 0; i < samples; i++) {
+    // Average both channels for proper mono conversion
     const leftSample = stereoBuffer.readInt16LE(i * 4);
-    monoBuffer.writeInt16LE(leftSample, i * 2);
+    const rightSample = stereoBuffer.readInt16LE(i * 4 + 2);
+    const monoSample = Math.round((leftSample + rightSample) / 2);
+    monoBuffer.writeInt16LE(monoSample, i * 2);
   }
 
   return monoBuffer;

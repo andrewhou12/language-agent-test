@@ -108,7 +108,9 @@ export class DeepgramTranscription {
         smart_format: true,
         punctuate: true,
         interim_results: true,
-        endpointing: 300,
+        utterance_end_ms: 1000,    // Wait 1s of silence before utterance end (better for pauses)
+        endpointing: 500,          // Increased from 300ms to 500ms
+        vad_events: true,          // Voice activity detection events
         encoding: 'linear16',
         sample_rate: 24000,
         channels: 1,

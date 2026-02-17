@@ -4417,7 +4417,9 @@ class DeepgramTranscription {
                 smart_format: true,
                 punctuate: true,
                 interim_results: true,
-                endpointing: 300,
+                utterance_end_ms: 1000, // Wait 1s of silence before utterance end (better for pauses)
+                endpointing: 500, // Increased from 300ms to 500ms
+                vad_events: true, // Voice activity detection events
                 encoding: 'linear16',
                 sample_rate: 24000,
                 channels: 1,
@@ -4716,11 +4718,14 @@ const BYTES_PER_SAMPLE = 2; // 16-bit
 const CHUNK_DURATION = 0.1; // 100ms chunks
 const CHUNK_SIZE = SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 function convertStereoToMono(stereoBuffer) {
-    const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair
+    const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair (2 bytes per channel)
     const monoBuffer = Buffer.alloc(samples * 2);
     for (let i = 0; i < samples; i++) {
+        // Average both channels for proper mono conversion
         const leftSample = stereoBuffer.readInt16LE(i * 4);
-        monoBuffer.writeInt16LE(leftSample, i * 2);
+        const rightSample = stereoBuffer.readInt16LE(i * 4 + 2);
+        const monoSample = Math.round((leftSample + rightSample) / 2);
+        monoBuffer.writeInt16LE(monoSample, i * 2);
     }
     return monoBuffer;
 }
