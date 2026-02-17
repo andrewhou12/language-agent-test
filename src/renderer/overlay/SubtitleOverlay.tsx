@@ -2,140 +2,149 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   TranscriptionResult,
   OverlayStyle,
+  BubbleState,
   DEFAULT_OVERLAY_STYLE,
+  DEFAULT_BUBBLE_STATE,
 } from '../../shared/types';
 import type { OverlayAPI } from '../../main/preload-overlay';
 
 // Access the electronAPI with proper typing for the overlay context
 const electronAPI = (window as unknown as { electronAPI: OverlayAPI }).electronAPI;
 
-interface SubtitleEntry {
+interface TranscriptEntry {
   id: number;
   text: string;
   timestamp: number;
-  isFadingOut: boolean;
   isFinal: boolean;
 }
 
-export function SubtitleOverlay(): React.ReactElement {
-  const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
-  const [style, setStyle] = useState<OverlayStyle>(DEFAULT_OVERLAY_STYLE);
-  const [isListening, setIsListening] = useState(true);
-  const nextIdRef = useRef(0);
-  const fadeOutTimersRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
+// Configuration
+const MAX_AGE_MS = 30000;      // 30 seconds rolling window
+const MAX_ENTRIES = 50;        // Max entries to keep
+const PAUSE_CLEAR_MS = 5000;   // Clear after 5 seconds of silence
 
-  // Clear a subtitle after fade-out completes
-  const removeSubtitle = useCallback((id: number) => {
-    setSubtitles((prev) => prev.filter((s) => s.id !== id));
-    fadeOutTimersRef.current.delete(id);
+export function SubtitleOverlay(): React.ReactElement {
+  const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
+  const [style, setStyle] = useState<OverlayStyle>(DEFAULT_OVERLAY_STYLE);
+  const [bubbleState, setBubbleState] = useState<BubbleState>(DEFAULT_BUBBLE_STATE);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const nextIdRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+
+  // Load initial bubble state
+  useEffect(() => {
+    electronAPI.getBubbleState().then((state) => {
+      setBubbleState(state);
+      setIsCollapsed(state.collapsed);
+    });
   }, []);
 
-  // Start fade-out animation for a subtitle
-  const startFadeOut = useCallback(
-    (id: number) => {
-      setSubtitles((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, isFadingOut: true } : s))
-      );
+  // Auto-scroll to bottom when new transcripts arrive
+  useEffect(() => {
+    if (scrollRef.current && !isCollapsed) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [transcripts, isCollapsed]);
 
-      // Remove after fade-out animation (500ms as defined in CSS)
-      setTimeout(() => removeSubtitle(id), 500);
-    },
-    [removeSubtitle]
-  );
+  // Clear transcripts after pause (5 seconds of silence)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const timeSinceLastActivity = Date.now() - lastActivityRef.current;
+      if (timeSinceLastActivity > PAUSE_CLEAR_MS && transcripts.length > 0) {
+        setTranscripts([]);
+      }
+    }, 1000);
 
-  // Schedule a subtitle to fade out after displayDuration
-  const scheduleRemoval = useCallback(
-    (id: number, displayDuration: number) => {
-      const timer = setTimeout(() => {
-        startFadeOut(id);
-      }, displayDuration * 1000);
+    return () => clearInterval(interval);
+  }, [transcripts.length]);
 
-      fadeOutTimersRef.current.set(id, timer);
-    },
-    [startFadeOut]
-  );
+  // Trim old transcripts (rolling window)
+  const trimTranscripts = useCallback((entries: TranscriptEntry[]): TranscriptEntry[] => {
+    const now = Date.now();
+    return entries
+      .filter(e => now - e.timestamp < MAX_AGE_MS)
+      .slice(-MAX_ENTRIES);
+  }, []);
 
   // Handle incoming transcription
   const handleTranscription = useCallback(
     (result: TranscriptionResult) => {
-      setSubtitles((prev) => {
+      lastActivityRef.current = Date.now();
+
+      setTranscripts((prev) => {
         // Find the last non-final entry (current interim)
-        const lastInterimIndex = prev.findIndex((s) => !s.isFinal && !s.isFadingOut);
+        const lastInterimIndex = prev.findIndex((s) => !s.isFinal);
+
+        let updated: TranscriptEntry[];
 
         if (result.isFinal) {
           // Final result: replace any interim with this final version
           if (lastInterimIndex !== -1) {
-            // Replace interim with final
-            const updated = [...prev];
+            updated = [...prev];
             updated[lastInterimIndex] = {
               ...updated[lastInterimIndex],
               text: result.text,
               isFinal: true,
             };
-            // Schedule fade-out for the now-final entry
-            scheduleRemoval(updated[lastInterimIndex].id, style.displayDuration);
-            return updated;
           } else {
             // No interim to replace, add as new final entry
             const id = nextIdRef.current++;
-            const newEntry: SubtitleEntry = {
-              id,
-              text: result.text,
-              timestamp: result.timestamp,
-              isFadingOut: false,
-              isFinal: true,
-            };
-            scheduleRemoval(id, style.displayDuration);
-            const maxToKeep = style.maxLines;
-            const kept = prev.slice(-(maxToKeep - 1));
-            return [...kept, newEntry];
+            updated = [
+              ...prev,
+              {
+                id,
+                text: result.text,
+                timestamp: result.timestamp,
+                isFinal: true,
+              },
+            ];
           }
         } else {
           // Interim result: update existing interim or create new one
           if (lastInterimIndex !== -1) {
-            // Update existing interim in place
-            const updated = [...prev];
+            updated = [...prev];
             updated[lastInterimIndex] = {
               ...updated[lastInterimIndex],
               text: result.text,
+              timestamp: Date.now(),
             };
-            return updated;
           } else {
-            // Create new interim entry
             const id = nextIdRef.current++;
-            const newEntry: SubtitleEntry = {
-              id,
-              text: result.text,
-              timestamp: result.timestamp,
-              isFadingOut: false,
-              isFinal: false,
-            };
-            const maxToKeep = style.maxLines;
-            const kept = prev.slice(-(maxToKeep - 1));
-            return [...kept, newEntry];
+            updated = [
+              ...prev,
+              {
+                id,
+                text: result.text,
+                timestamp: result.timestamp,
+                isFinal: false,
+              },
+            ];
           }
         }
-      });
 
-      setIsListening(true);
+        return trimTranscripts(updated);
+      });
     },
-    [style.maxLines, style.displayDuration, scheduleRemoval]
+    [trimTranscripts]
   );
 
   // Handle clear transcription command
   const handleClear = useCallback(() => {
-    // Clear all timers
-    fadeOutTimersRef.current.forEach((timer) => clearTimeout(timer));
-    fadeOutTimersRef.current.clear();
-
-    // Clear all subtitles
-    setSubtitles([]);
-    setIsListening(false);
+    setTranscripts([]);
   }, []);
 
   // Handle style updates
   const handleStyleUpdate = useCallback((newStyle: OverlayStyle) => {
     setStyle(newStyle);
+  }, []);
+
+  // Toggle collapse
+  const handleToggleCollapse = useCallback(async () => {
+    const newState = await electronAPI.toggleCollapse();
+    setBubbleState(newState);
+    setIsCollapsed(newState.collapsed);
   }, []);
 
   // Set up IPC listeners
@@ -146,79 +155,70 @@ export function SubtitleOverlay(): React.ReactElement {
 
     return () => {
       electronAPI.removeAllListeners();
-      // Clear all timers on unmount
-      fadeOutTimersRef.current.forEach((timer) => clearTimeout(timer));
     };
   }, [handleTranscription, handleClear, handleStyleUpdate]);
 
-  // Generate dynamic styles based on settings
-  const containerStyle: React.CSSProperties = {
-    fontFamily: style.fontFamily,
-    fontSize: `${style.fontSize}px`,
-    fontWeight: style.fontWeight,
-    color: style.textColor,
-  };
-
-  const lineStyle: React.CSSProperties = {
-    backgroundColor: `rgba(${hexToRgb(style.backgroundColor)}, ${style.backgroundOpacity})`,
-  };
-
-  // Determine position class
-  const positionClass = `position-${style.position}`;
-
   // Determine language class for CJK fonts
   const getLangClass = (text: string): string => {
-    // Check for CJK characters
-    if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text)) {
-      return 'lang-ja';
-    }
-    if (/[\uAC00-\uD7AF]/.test(text)) {
-      return 'lang-ko';
-    }
-    if (/[\u4E00-\u9FFF]/.test(text)) {
-      return 'lang-zh';
-    }
+    if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return 'lang-cjk';
+    if (/[\uAC00-\uD7AF]/.test(text)) return 'lang-cjk';
+    if (/[\u4E00-\u9FFF]/.test(text)) return 'lang-cjk';
     return '';
   };
 
-  return (
-    <div
-      className={`subtitle-overlay ${positionClass}`}
-      style={containerStyle}
-    >
-      <div className="subtitle-container">
-        {subtitles.length === 0 && isListening && (
-          <div className="status-indicator">
-            <span className="status-dot" />
-            <span>Listening...</span>
-          </div>
-        )}
+  // Build transcript text with proper spacing
+  const renderTranscriptText = () => {
+    return transcripts.map((t, index) => (
+      <span
+        key={t.id}
+        className={`transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(t.text)}`}
+      >
+        {t.text}
+        {index < transcripts.length - 1 ? ' ' : ''}
+      </span>
+    ));
+  };
 
-        {subtitles.map((subtitle) => (
-          <div
-            key={subtitle.id}
-            className={`subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${
-              style.textShadow ? 'text-shadow' : ''
-            } ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`}
-            style={lineStyle}
-          >
-            {subtitle.text}
-          </div>
-        ))}
+  return (
+    <div className={`bubble-container ${isCollapsed ? 'collapsed' : ''}`}>
+      {/* Header / Drag handle */}
+      <div className="bubble-header">
+        <div className="header-left">
+          <div className="status-dot" />
+          {isCollapsed && <span className="collapsed-label">Live</span>}
+        </div>
+        <button
+          className="collapse-btn"
+          onClick={handleToggleCollapse}
+          title={isCollapsed ? 'Expand' : 'Collapse'}
+        >
+          {isCollapsed ? '▼' : '▲'}
+        </button>
       </div>
+
+      {/* Transcript content - hidden when collapsed */}
+      {!isCollapsed && (
+        <div
+          className="bubble-content"
+          ref={scrollRef}
+          style={{
+            fontFamily: style.fontFamily,
+            fontSize: `${style.fontSize}px`,
+            fontWeight: style.fontWeight,
+          }}
+        >
+          {transcripts.length === 0 ? (
+            <div className="empty-state">Listening...</div>
+          ) : (
+            <div className="transcript-text">
+              {renderTranscriptText()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Resize handle */}
+      {!isCollapsed && <div className="resize-handle" />}
     </div>
   );
-}
-
-// Helper function to convert hex color to RGB
-function hexToRgb(hex: string): string {
-  // Remove # if present
-  const cleanHex = hex.replace('#', '');
-
-  // Parse hex values
-  const r = parseInt(cleanHex.substring(0, 2), 16);
-  const g = parseInt(cleanHex.substring(2, 4), 16);
-  const b = parseInt(cleanHex.substring(4, 6), 16);
-
-  return `${r}, ${g}, ${b}`;
 }

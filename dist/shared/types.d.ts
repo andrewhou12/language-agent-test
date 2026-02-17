@@ -44,6 +44,13 @@ export interface OverlayStyle {
     maxLines: number;
     displayDuration: number;
 }
+export interface BubbleState {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    collapsed: boolean;
+}
 export interface AppSettings {
     transcriptionProvider: TranscriptionProvider;
     deepgramApiKey: string;
@@ -53,12 +60,14 @@ export interface AppSettings {
     gpuAcceleration: boolean;
     chunkSize: number;
     overlayStyle: OverlayStyle;
+    bubbleState: BubbleState;
     toggleShortcut: string;
     showHideShortcut: string;
     autoStart: boolean;
     minimizeToTray: boolean;
 }
 export declare const DEFAULT_OVERLAY_STYLE: OverlayStyle;
+export declare const DEFAULT_BUBBLE_STATE: BubbleState;
 export declare const DEFAULT_SETTINGS: AppSettings;
 export declare const LANGUAGE_NAMES: Record<SupportedLanguage, string>;
 export declare const PROVIDER_NAMES: Record<TranscriptionProvider, string>;
@@ -82,6 +91,9 @@ export declare const IPC_CHANNELS: {
     readonly TRANSCRIPTION_UPDATE: "transcription-update";
     readonly CLEAR_TRANSCRIPTION: "clear-transcription";
     readonly UPDATE_OVERLAY_STYLE: "update-overlay-style";
+    readonly SAVE_BUBBLE_STATE: "save-bubble-state";
+    readonly GET_BUBBLE_STATE: "get-bubble-state";
+    readonly TOGGLE_BUBBLE_COLLAPSE: "toggle-bubble-collapse";
     readonly STATE_CHANGED: "state-changed";
     readonly ERROR_OCCURRED: "error-occurred";
     readonly GET_DIAGNOSTICS: "get-diagnostics";

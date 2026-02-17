@@ -59,6 +59,14 @@ export interface OverlayStyle {
   displayDuration: number; // in seconds
 }
 
+export interface BubbleState {
+  x: number;       // -1 means center
+  y: number;       // -1 means center
+  width: number;
+  height: number;
+  collapsed: boolean;
+}
+
 export interface AppSettings {
   // Provider selection
   transcriptionProvider: TranscriptionProvider;
@@ -77,6 +85,7 @@ export interface AppSettings {
 
   // Overlay settings
   overlayStyle: OverlayStyle;
+  bubbleState: BubbleState;
 
   // Shortcuts
   toggleShortcut: string;
@@ -101,6 +110,14 @@ export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
   displayDuration: 5,
 };
 
+export const DEFAULT_BUBBLE_STATE: BubbleState = {
+  x: -1,  // -1 means center
+  y: -1,
+  width: 400,
+  height: 250,
+  collapsed: false,
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   transcriptionProvider: 'deepgram',
   deepgramApiKey: '',
@@ -110,6 +127,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   gpuAcceleration: true,
   chunkSize: 2,
   overlayStyle: DEFAULT_OVERLAY_STYLE,
+  bubbleState: DEFAULT_BUBBLE_STATE,
   toggleShortcut: 'CommandOrControl+Shift+S',
   showHideShortcut: 'CommandOrControl+Shift+H',
   autoStart: false,
@@ -159,6 +177,11 @@ export const IPC_CHANNELS = {
   TRANSCRIPTION_UPDATE: 'transcription-update',
   CLEAR_TRANSCRIPTION: 'clear-transcription',
   UPDATE_OVERLAY_STYLE: 'update-overlay-style',
+
+  // Overlay -> Main (bubble state)
+  SAVE_BUBBLE_STATE: 'save-bubble-state',
+  GET_BUBBLE_STATE: 'get-bubble-state',
+  TOGGLE_BUBBLE_COLLAPSE: 'toggle-bubble-collapse',
 
   // Main -> Control
   STATE_CHANGED: 'state-changed',

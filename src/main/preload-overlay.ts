@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { TranscriptionResult, OverlayStyle, IPC_CHANNELS } from '../shared/types';
+import { TranscriptionResult, OverlayStyle, BubbleState, IPC_CHANNELS } from '../shared/types';
 
 // Define the API exposed to the overlay renderer
 export interface OverlayAPI {
@@ -14,6 +14,11 @@ export interface OverlayAPI {
   onTranscriptionUpdate: (callback: (result: TranscriptionResult) => void) => void;
   onClearTranscription: (callback: () => void) => void;
   onStyleUpdate: (callback: (style: OverlayStyle) => void) => void;
+
+  // Bubble state
+  getBubbleState: () => Promise<BubbleState>;
+  saveBubbleState: (state: BubbleState) => Promise<BubbleState>;
+  toggleCollapse: () => Promise<BubbleState>;
 
   // Cleanup
   removeAllListeners: () => void;
@@ -33,6 +38,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onStyleUpdate: (callback: (style: OverlayStyle) => void) => {
     ipcRenderer.on(IPC_CHANNELS.UPDATE_OVERLAY_STYLE, (_event, style) => callback(style));
   },
+
+  // Bubble state
+  getBubbleState: () => ipcRenderer.invoke(IPC_CHANNELS.GET_BUBBLE_STATE),
+  saveBubbleState: (state: BubbleState) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_BUBBLE_STATE, state),
+  toggleCollapse: () => ipcRenderer.invoke(IPC_CHANNELS.TOGGLE_BUBBLE_COLLAPSE),
 
   // Cleanup
   removeAllListeners: () => {

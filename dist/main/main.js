@@ -5317,20 +5317,33 @@ function createControlWindow() {
 }
 function createOverlayWindow() {
     const primaryDisplay = electron_1.screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize;
+    const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+    const settings = getSettings();
+    const bubbleState = settings.bubbleState || types_1.DEFAULT_BUBBLE_STATE;
+    // Calculate position (center if -1)
+    const windowWidth = bubbleState.width;
+    const windowHeight = bubbleState.height;
+    const windowX = bubbleState.x === -1
+        ? Math.floor((screenWidth - windowWidth) / 2)
+        : bubbleState.x;
+    const windowY = bubbleState.y === -1
+        ? Math.floor((screenHeight - windowHeight) / 2)
+        : bubbleState.y;
     overlayWindow = new electron_1.BrowserWindow({
-        width: Math.min(800, width - 100), // Not full width
-        height: 120,
-        x: Math.floor((width - Math.min(800, width - 100)) / 2), // Centered
-        y: height - 140, // Near bottom
+        width: windowWidth,
+        height: windowHeight,
+        minWidth: 150,
+        minHeight: 60,
+        x: windowX,
+        y: windowY,
         transparent: true,
         frame: false,
         alwaysOnTop: true,
         skipTaskbar: true,
-        focusable: false,
+        focusable: true, // Allow focus for interaction
         hasShadow: false,
-        resizable: false,
-        movable: false,
+        resizable: true, // Enable resize
+        movable: true, // Enable move (via -webkit-app-region: drag)
         show: false, // Don't show on creation
         backgroundColor: '#00000000', // Fully transparent background
         webPreferences: {
@@ -5340,12 +5353,34 @@ function createOverlayWindow() {
         },
     });
     overlayWindow.loadFile(path.join(__dirname, '../renderer/overlay/index.html'));
-    overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    // Don't ignore mouse events - we need interaction for dragging/resizing
+    // The CSS will handle which areas are draggable
     // Set window level to float above other windows
     overlayWindow.setAlwaysOnTop(true, 'floating');
+    // Save position/size when window moves or resizes
+    overlayWindow.on('moved', () => {
+        saveBubblePosition();
+    });
+    overlayWindow.on('resized', () => {
+        saveBubblePosition();
+    });
     overlayWindow.on('closed', () => {
         overlayWindow = null;
     });
+}
+function saveBubblePosition() {
+    if (!overlayWindow)
+        return;
+    const bounds = overlayWindow.getBounds();
+    const settings = getSettings();
+    const updatedBubbleState = {
+        ...settings.bubbleState,
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+    };
+    store.set('settings', { ...settings, bubbleState: updatedBubbleState });
 }
 function createTray() {
     // Create a simple tray icon (16x16 transparent PNG would be ideal)
@@ -5698,6 +5733,47 @@ function setupIpcHandlers() {
             return { success: false, error: 'Failed to write file' };
         }
     });
+    // Bubble state handlers
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.GET_BUBBLE_STATE, () => {
+        const settings = getSettings();
+        return settings.bubbleState || types_1.DEFAULT_BUBBLE_STATE;
+    });
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.SAVE_BUBBLE_STATE, (_, bubbleState) => {
+        const settings = getSettings();
+        store.set('settings', { ...settings, bubbleState });
+        // Update window size if collapsed state changed
+        if (overlayWindow) {
+            if (bubbleState.collapsed) {
+                overlayWindow.setSize(80, 32);
+            }
+            else {
+                overlayWindow.setSize(bubbleState.width, bubbleState.height);
+            }
+        }
+        return bubbleState;
+    });
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.TOGGLE_BUBBLE_COLLAPSE, () => {
+        const settings = getSettings();
+        const currentState = settings.bubbleState || types_1.DEFAULT_BUBBLE_STATE;
+        const newCollapsed = !currentState.collapsed;
+        const newState = {
+            ...currentState,
+            collapsed: newCollapsed,
+        };
+        store.set('settings', { ...settings, bubbleState: newState });
+        // Update window size
+        if (overlayWindow) {
+            if (newCollapsed) {
+                overlayWindow.setSize(80, 32);
+                overlayWindow.setResizable(false);
+            }
+            else {
+                overlayWindow.setSize(newState.width, newState.height);
+                overlayWindow.setResizable(true);
+            }
+        }
+        return newState;
+    });
 }
 function formatDuration(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -5754,7 +5830,7 @@ electron_1.app.on('before-quit', async () => {
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_OVERLAY_STYLE = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = void 0;
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
     fontFamily: 'system-ui, "Noto Sans CJK", sans-serif',
@@ -5768,6 +5844,13 @@ exports.DEFAULT_OVERLAY_STYLE = {
     maxLines: 2,
     displayDuration: 5,
 };
+exports.DEFAULT_BUBBLE_STATE = {
+    x: -1, // -1 means center
+    y: -1,
+    width: 400,
+    height: 250,
+    collapsed: false,
+};
 exports.DEFAULT_SETTINGS = {
     transcriptionProvider: 'deepgram',
     deepgramApiKey: '',
@@ -5777,6 +5860,7 @@ exports.DEFAULT_SETTINGS = {
     gpuAcceleration: true,
     chunkSize: 2,
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
+    bubbleState: exports.DEFAULT_BUBBLE_STATE,
     toggleShortcut: 'CommandOrControl+Shift+S',
     showHideShortcut: 'CommandOrControl+Shift+H',
     autoStart: false,
@@ -5820,6 +5904,10 @@ exports.IPC_CHANNELS = {
     TRANSCRIPTION_UPDATE: 'transcription-update',
     CLEAR_TRANSCRIPTION: 'clear-transcription',
     UPDATE_OVERLAY_STYLE: 'update-overlay-style',
+    // Overlay -> Main (bubble state)
+    SAVE_BUBBLE_STATE: 'save-bubble-state',
+    GET_BUBBLE_STATE: 'get-bubble-state',
+    TOGGLE_BUBBLE_COLLAPSE: 'toggle-bubble-collapse',
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',

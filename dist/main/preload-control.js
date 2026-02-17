@@ -11,7 +11,7 @@
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_OVERLAY_STYLE = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = void 0;
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
     fontFamily: 'system-ui, "Noto Sans CJK", sans-serif',
@@ -25,6 +25,13 @@ exports.DEFAULT_OVERLAY_STYLE = {
     maxLines: 2,
     displayDuration: 5,
 };
+exports.DEFAULT_BUBBLE_STATE = {
+    x: -1, // -1 means center
+    y: -1,
+    width: 400,
+    height: 250,
+    collapsed: false,
+};
 exports.DEFAULT_SETTINGS = {
     transcriptionProvider: 'deepgram',
     deepgramApiKey: '',
@@ -34,6 +41,7 @@ exports.DEFAULT_SETTINGS = {
     gpuAcceleration: true,
     chunkSize: 2,
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
+    bubbleState: exports.DEFAULT_BUBBLE_STATE,
     toggleShortcut: 'CommandOrControl+Shift+S',
     showHideShortcut: 'CommandOrControl+Shift+H',
     autoStart: false,
@@ -77,6 +85,10 @@ exports.IPC_CHANNELS = {
     TRANSCRIPTION_UPDATE: 'transcription-update',
     CLEAR_TRANSCRIPTION: 'clear-transcription',
     UPDATE_OVERLAY_STYLE: 'update-overlay-style',
+    // Overlay -> Main (bubble state)
+    SAVE_BUBBLE_STATE: 'save-bubble-state',
+    GET_BUBBLE_STATE: 'get-bubble-state',
+    TOGGLE_BUBBLE_COLLAPSE: 'toggle-bubble-collapse',
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',

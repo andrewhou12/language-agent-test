@@ -1,1 +1,1 @@
-{"version":3,"file":"SubtitleOverlay.d.ts","sourceRoot":"","sources":["../../../src/renderer/overlay/SubtitleOverlay.tsx"],"names":[],"mappings":"AAAA,OAAO,KAAmD,MAAM,OAAO,CAAC;AAmBxE,wBAAgB,eAAe,IAAI,KAAK,CAAC,YAAY,CA+LpD"}
+{"version":3,"file":"SubtitleOverlay.d.ts","sourceRoot":"","sources":["../../../src/renderer/overlay/SubtitleOverlay.tsx"],"names":[],"mappings":"AAAA,OAAO,KAAmD,MAAM,OAAO,CAAC;AAyBxE,wBAAgB,eAAe,IAAI,KAAK,CAAC,YAAY,CAsMpD"}
