@@ -5774,6 +5774,44 @@ function setupIpcHandlers() {
         }
         return newState;
     });
+    // Overlay mode handlers
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.GET_OVERLAY_MODE, () => {
+        const settings = getSettings();
+        return settings.overlayMode || 'bubble';
+    });
+    electron_1.ipcMain.handle(types_1.IPC_CHANNELS.SET_OVERLAY_MODE, (_, mode) => {
+        const settings = getSettings();
+        store.set('settings', { ...settings, overlayMode: mode });
+        // Notify the overlay window of the mode change
+        if (overlayWindow) {
+            overlayWindow.webContents.send(types_1.IPC_CHANNELS.SET_OVERLAY_MODE, mode);
+            // Adjust window behavior based on mode
+            if (mode === 'subtitle') {
+                // Classic subtitle: fixed at bottom, full width, not draggable
+                const primaryDisplay = electron_1.screen.getPrimaryDisplay();
+                const { width } = primaryDisplay.workAreaSize;
+                overlayWindow.setSize(width, 120);
+                overlayWindow.setPosition(0, primaryDisplay.workAreaSize.height - 120);
+                overlayWindow.setResizable(false);
+                overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+            }
+            else {
+                // Bubble mode: restore bubble state
+                const bubbleState = settings.bubbleState || types_1.DEFAULT_BUBBLE_STATE;
+                overlayWindow.setSize(bubbleState.width, bubbleState.height);
+                overlayWindow.setResizable(true);
+                overlayWindow.setIgnoreMouseEvents(false);
+                // Center if position not set
+                if (bubbleState.x === -1 || bubbleState.y === -1) {
+                    overlayWindow.center();
+                }
+                else {
+                    overlayWindow.setPosition(bubbleState.x, bubbleState.y);
+                }
+            }
+        }
+        return mode;
+    });
 }
 function formatDuration(seconds) {
     const hours = Math.floor(seconds / 3600);
@@ -5830,7 +5868,11 @@ electron_1.app.on('before-quit', async () => {
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.OVERLAY_MODE_NAMES = void 0;
+exports.OVERLAY_MODE_NAMES = {
+    bubble: 'Floating Bubble',
+    subtitle: 'Classic Subtitles',
+};
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
     fontFamily: 'system-ui, "Noto Sans CJK", sans-serif',
@@ -5859,6 +5901,7 @@ exports.DEFAULT_SETTINGS = {
     language: 'auto',
     gpuAcceleration: true,
     chunkSize: 2,
+    overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,
     toggleShortcut: 'CommandOrControl+Shift+S',
@@ -5908,6 +5951,8 @@ exports.IPC_CHANNELS = {
     SAVE_BUBBLE_STATE: 'save-bubble-state',
     GET_BUBBLE_STATE: 'get-bubble-state',
     TOGGLE_BUBBLE_COLLAPSE: 'toggle-bubble-collapse',
+    GET_OVERLAY_MODE: 'get-overlay-mode',
+    SET_OVERLAY_MODE: 'set-overlay-mode',
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',

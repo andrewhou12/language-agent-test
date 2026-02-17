@@ -2,6 +2,8 @@ export type TranscriptionState = 'idle' | 'starting' | 'active' | 'stopping';
 export type WhisperModel = 'tiny' | 'base' | 'small';
 export type SupportedLanguage = 'ja' | 'ko' | 'zh' | 'es' | 'fr' | 'de' | 'en' | 'auto';
 export type TranscriptionProvider = 'deepgram' | 'gladia';
+export type OverlayMode = 'bubble' | 'subtitle';
+export declare const OVERLAY_MODE_NAMES: Record<OverlayMode, string>;
 export interface TranscriptionResult {
     text: string;
     timestamp: number;
@@ -59,6 +61,7 @@ export interface AppSettings {
     language: SupportedLanguage;
     gpuAcceleration: boolean;
     chunkSize: number;
+    overlayMode: OverlayMode;
     overlayStyle: OverlayStyle;
     bubbleState: BubbleState;
     toggleShortcut: string;
@@ -94,6 +97,8 @@ export declare const IPC_CHANNELS: {
     readonly SAVE_BUBBLE_STATE: "save-bubble-state";
     readonly GET_BUBBLE_STATE: "get-bubble-state";
     readonly TOGGLE_BUBBLE_COLLAPSE: "toggle-bubble-collapse";
+    readonly GET_OVERLAY_MODE: "get-overlay-mode";
+    readonly SET_OVERLAY_MODE: "set-overlay-mode";
     readonly STATE_CHANGED: "state-changed";
     readonly ERROR_OCCURRED: "error-occurred";
     readonly GET_DIAGNOSTICS: "get-diagnostics";

@@ -4,8 +4,10 @@ import {
   TranscriptionState,
   SupportedLanguage,
   TranscriptionProvider,
+  OverlayMode,
   LANGUAGE_NAMES,
   PROVIDER_NAMES,
+  OVERLAY_MODE_NAMES,
 } from '../../shared/types';
 import type { ControlAPI } from '../../main/preload-control';
 import { useSystemAudio } from './useSystemAudio';
@@ -168,6 +170,15 @@ export function ControlPanel(): React.ReactElement {
     async (provider: TranscriptionProvider) => {
       if (!settings) return;
       const updated = await window.electronAPI.updateSettings({ transcriptionProvider: provider });
+      setSettings(updated);
+    },
+    [settings]
+  );
+
+  const handleOverlayModeChange = useCallback(
+    async (mode: OverlayMode) => {
+      if (!settings) return;
+      const updated = await window.electronAPI.updateSettings({ overlayMode: mode });
       setSettings(updated);
     },
     [settings]
@@ -367,6 +378,42 @@ export function ControlPanel(): React.ReactElement {
                     disabled={isActive}
                   >
                     {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Overlay Style */}
+        <div className={`settings-card ${expandedSection === 'overlay' ? 'expanded' : ''}`}>
+          <button className="card-header" onClick={() => toggleSection('overlay')}>
+            <div className="card-header-left">
+              <OverlayIcon />
+              <span>Overlay Style</span>
+            </div>
+            <div className="card-header-right">
+              <span className="current-value">{OVERLAY_MODE_NAMES[settings.overlayMode || 'bubble']}</span>
+              <ChevronIcon expanded={expandedSection === 'overlay'} />
+            </div>
+          </button>
+
+          {expandedSection === 'overlay' && (
+            <div className="card-content">
+              <div className="overlay-mode-grid">
+                {Object.entries(OVERLAY_MODE_NAMES).map(([code, name]) => (
+                  <button
+                    key={code}
+                    className={`overlay-mode-option ${(settings.overlayMode || 'bubble') === code ? 'selected' : ''}`}
+                    onClick={() => handleOverlayModeChange(code as OverlayMode)}
+                  >
+                    <div className="overlay-mode-icon">
+                      {code === 'bubble' ? <BubblePreviewIcon /> : <SubtitlePreviewIcon />}
+                    </div>
+                    <span className="overlay-mode-name">{name}</span>
+                    <span className="overlay-mode-desc">
+                      {code === 'bubble' ? 'Draggable floating window' : 'Fixed bottom subtitles'}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -592,6 +639,34 @@ function EyeOffIcon(): React.ReactElement {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
       <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
+function OverlayIcon(): React.ReactElement {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 15h18" />
+    </svg>
+  );
+}
+
+function BubblePreviewIcon(): React.ReactElement {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="4" y="4" width="16" height="14" rx="3" />
+      <path d="M8 9h8M8 12h5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SubtitlePreviewIcon(): React.ReactElement {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="2" y="2" width="20" height="20" rx="2" />
+      <rect x="4" y="14" width="16" height="4" rx="1" fill="currentColor" opacity="0.2" />
+      <path d="M6 16h12" strokeLinecap="round" />
     </svg>
   );
 }

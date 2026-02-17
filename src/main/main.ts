@@ -880,6 +880,48 @@ function setupIpcHandlers(): void {
 
     return newState;
   });
+
+  // Overlay mode handlers
+  ipcMain.handle(IPC_CHANNELS.GET_OVERLAY_MODE, () => {
+    const settings = getSettings();
+    return settings.overlayMode || 'bubble';
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SET_OVERLAY_MODE, (_, mode: 'bubble' | 'subtitle') => {
+    const settings = getSettings();
+    store.set('settings', { ...settings, overlayMode: mode });
+
+    // Notify the overlay window of the mode change
+    if (overlayWindow) {
+      overlayWindow.webContents.send(IPC_CHANNELS.SET_OVERLAY_MODE, mode);
+
+      // Adjust window behavior based on mode
+      if (mode === 'subtitle') {
+        // Classic subtitle: fixed at bottom, full width, not draggable
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const { width } = primaryDisplay.workAreaSize;
+        overlayWindow.setSize(width, 120);
+        overlayWindow.setPosition(0, primaryDisplay.workAreaSize.height - 120);
+        overlayWindow.setResizable(false);
+        overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+      } else {
+        // Bubble mode: restore bubble state
+        const bubbleState = settings.bubbleState || DEFAULT_BUBBLE_STATE;
+        overlayWindow.setSize(bubbleState.width, bubbleState.height);
+        overlayWindow.setResizable(true);
+        overlayWindow.setIgnoreMouseEvents(false);
+
+        // Center if position not set
+        if (bubbleState.x === -1 || bubbleState.y === -1) {
+          overlayWindow.center();
+        } else {
+          overlayWindow.setPosition(bubbleState.x, bubbleState.y);
+        }
+      }
+    }
+
+    return mode;
+  });
 }
 
 function formatDuration(seconds: number): string {

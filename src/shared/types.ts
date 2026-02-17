@@ -16,6 +16,13 @@ export type SupportedLanguage =
 
 export type TranscriptionProvider = 'deepgram' | 'gladia';
 
+export type OverlayMode = 'bubble' | 'subtitle';
+
+export const OVERLAY_MODE_NAMES: Record<OverlayMode, string> = {
+  bubble: 'Floating Bubble',
+  subtitle: 'Classic Subtitles',
+};
+
 export interface TranscriptionResult {
   text: string;
   timestamp: number;
@@ -84,6 +91,7 @@ export interface AppSettings {
   chunkSize: number; // in seconds (1-3)
 
   // Overlay settings
+  overlayMode: OverlayMode;
   overlayStyle: OverlayStyle;
   bubbleState: BubbleState;
 
@@ -126,6 +134,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   language: 'auto',
   gpuAcceleration: true,
   chunkSize: 2,
+  overlayMode: 'bubble',
   overlayStyle: DEFAULT_OVERLAY_STYLE,
   bubbleState: DEFAULT_BUBBLE_STATE,
   toggleShortcut: 'CommandOrControl+Shift+S',
@@ -182,6 +191,8 @@ export const IPC_CHANNELS = {
   SAVE_BUBBLE_STATE: 'save-bubble-state',
   GET_BUBBLE_STATE: 'get-bubble-state',
   TOGGLE_BUBBLE_COLLAPSE: 'toggle-bubble-collapse',
+  GET_OVERLAY_MODE: 'get-overlay-mode',
+  SET_OVERLAY_MODE: 'set-overlay-mode',
 
   // Main -> Control
   STATE_CHANGED: 'state-changed',
