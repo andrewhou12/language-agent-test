@@ -11,7 +11,11 @@
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.OVERLAY_MODE_NAMES = void 0;
+exports.OVERLAY_MODE_NAMES = {
+    bubble: 'Floating Bubble',
+    subtitle: 'Classic Subtitles',
+};
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
     fontFamily: 'system-ui, "Noto Sans CJK", sans-serif',
@@ -27,9 +31,9 @@ exports.DEFAULT_OVERLAY_STYLE = {
 };
 exports.DEFAULT_BUBBLE_STATE = {
     x: -1, // -1 means center
-    y: -1,
-    width: 400,
-    height: 250,
+    y: -1, // -1 means lower-center (75% down screen)
+    width: 320,
+    height: 80,
     collapsed: false,
 };
 exports.DEFAULT_SETTINGS = {
@@ -40,6 +44,7 @@ exports.DEFAULT_SETTINGS = {
     language: 'auto',
     gpuAcceleration: true,
     chunkSize: 2,
+    overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,
     toggleShortcut: 'CommandOrControl+Shift+S',
@@ -89,6 +94,8 @@ exports.IPC_CHANNELS = {
     SAVE_BUBBLE_STATE: 'save-bubble-state',
     GET_BUBBLE_STATE: 'get-bubble-state',
     TOGGLE_BUBBLE_COLLAPSE: 'toggle-bubble-collapse',
+    GET_OVERLAY_MODE: 'get-overlay-mode',
+    SET_OVERLAY_MODE: 'set-overlay-mode',
     // Main -> Control
     STATE_CHANGED: 'state-changed',
     ERROR_OCCURRED: 'error-occurred',
@@ -176,6 +183,11 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
     onStyleUpdate: (callback) => {
         electron_1.ipcRenderer.on(types_1.IPC_CHANNELS.UPDATE_OVERLAY_STYLE, (_event, style) => callback(style));
     },
+    onOverlayModeChange: (callback) => {
+        electron_1.ipcRenderer.on(types_1.IPC_CHANNELS.SET_OVERLAY_MODE, (_event, mode) => callback(mode));
+    },
+    // Overlay mode
+    getOverlayMode: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_OVERLAY_MODE),
     // Bubble state
     getBubbleState: () => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.GET_BUBBLE_STATE),
     saveBubbleState: (state) => electron_1.ipcRenderer.invoke(types_1.IPC_CHANNELS.SAVE_BUBBLE_STATE, state),
@@ -185,6 +197,7 @@ electron_1.contextBridge.exposeInMainWorld('electronAPI', {
         electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.TRANSCRIPTION_UPDATE);
         electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.CLEAR_TRANSCRIPTION);
         electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.UPDATE_OVERLAY_STYLE);
+        electron_1.ipcRenderer.removeAllListeners(types_1.IPC_CHANNELS.SET_OVERLAY_MODE);
     },
 });
 

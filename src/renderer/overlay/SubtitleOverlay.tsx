@@ -3,7 +3,6 @@ import {
   TranscriptionResult,
   OverlayStyle,
   BubbleState,
-  DEFAULT_OVERLAY_STYLE,
   DEFAULT_BUBBLE_STATE,
 } from '../../shared/types';
 import type { OverlayAPI } from '../../main/preload-overlay';
@@ -23,9 +22,16 @@ const MAX_AGE_MS = 30000;      // 30 seconds rolling window
 const MAX_ENTRIES = 50;        // Max entries to keep
 const PAUSE_CLEAR_MS = 5000;   // Clear after 5 seconds of silence
 
-export function SubtitleOverlay(): React.ReactElement {
+interface SubtitleOverlayProps {
+  style: OverlayStyle;
+  registerHandlers: (
+    onTranscription: (result: TranscriptionResult) => void,
+    onClear: () => void
+  ) => void;
+}
+
+export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProps): React.ReactElement {
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
-  const [style, setStyle] = useState<OverlayStyle>(DEFAULT_OVERLAY_STYLE);
   const [bubbleState, setBubbleState] = useState<BubbleState>(DEFAULT_BUBBLE_STATE);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -135,10 +141,10 @@ export function SubtitleOverlay(): React.ReactElement {
     setTranscripts([]);
   }, []);
 
-  // Handle style updates
-  const handleStyleUpdate = useCallback((newStyle: OverlayStyle) => {
-    setStyle(newStyle);
-  }, []);
+  // Register handlers with parent
+  useEffect(() => {
+    registerHandlers(handleTranscription, handleClear);
+  }, [registerHandlers, handleTranscription, handleClear]);
 
   // Toggle collapse
   const handleToggleCollapse = useCallback(async () => {
@@ -146,17 +152,6 @@ export function SubtitleOverlay(): React.ReactElement {
     setBubbleState(newState);
     setIsCollapsed(newState.collapsed);
   }, []);
-
-  // Set up IPC listeners
-  useEffect(() => {
-    electronAPI.onTranscriptionUpdate(handleTranscription);
-    electronAPI.onClearTranscription(handleClear);
-    electronAPI.onStyleUpdate(handleStyleUpdate);
-
-    return () => {
-      electronAPI.removeAllListeners();
-    };
-  }, [handleTranscription, handleClear, handleStyleUpdate]);
 
   // Determine language class for CJK fonts
   const getLangClass = (text: string): string => {

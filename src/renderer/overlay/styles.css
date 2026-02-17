@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* Mode-specific body styles for proper isolation */
+body.mode-bubble {
+  /* Bubble mode: small window, container fills it */
+  pointer-events: auto;
+}
+
+body.mode-subtitle {
+  /* Subtitle mode: fullscreen window, click-through */
+  pointer-events: none;
+}
+
 /* Bubble Overlay Styles */
 
 /* Main container - fills the transparent window */
@@ -205,4 +216,118 @@
 
 .transcript-word {
   animation: fadeIn 0.15s ease-out;
+}
+
+/* ========================================
+   Classic Subtitle Overlay Styles
+   ======================================== */
+
+.subtitle-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.subtitle-overlay.position-bottom {
+  bottom: 40px;
+}
+
+.subtitle-overlay.position-top {
+  top: 40px;
+}
+
+.subtitle-overlay.position-custom {
+  /* Position will be set via inline styles */
+}
+
+.subtitle-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 90%;
+}
+
+.subtitle-line {
+  padding: 8px 20px;
+  border-radius: 6px;
+  line-height: 1.4;
+  text-align: center;
+  animation: slideIn 0.2s ease-out;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
+.subtitle-line.text-shadow {
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.9),
+    0 0 10px rgba(0, 0, 0, 0.7);
+}
+
+.subtitle-line.text-outline {
+  -webkit-text-stroke: 1px rgba(0, 0, 0, 0.8);
+}
+
+.subtitle-line.fading-out {
+  animation: fadeOut 0.5s ease-out forwards;
+}
+
+/* CJK Language Support */
+.subtitle-line.lang-ja,
+.subtitle-line.lang-zh {
+  font-family:
+    "Noto Sans CJK JP",
+    "Noto Sans CJK SC",
+    "Hiragino Sans",
+    "Meiryo",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+}
+
+.subtitle-line.lang-ko {
+  font-family:
+    "Noto Sans CJK KR",
+    "Malgun Gothic",
+    system-ui,
+    sans-serif;
+}
+
+/* Status Indicator for Classic Subtitle */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
 }
