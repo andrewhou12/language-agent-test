@@ -5304,7 +5304,7 @@ function createControlWindow() {
     });
     controlWindow.loadFile(path.join(__dirname, '../renderer/control/index.html'));
     // Open DevTools for debugging
-    controlWindow.webContents.openDevTools();
+    // controlWindow.webContents.openDevTools();
     controlWindow.on('close', (event) => {
         if (settings.minimizeToTray && tray) {
             event.preventDefault();
