@@ -4,19 +4,37 @@ This document provides a high-level overview of the Language Agent application a
 
 ## Table of Contents
 
-1. [Electron Fundamentals](#electron-fundamentals)
-2. [Process Architecture](#process-architecture)
-3. [Project Structure](#project-structure)
-4. [IPC Communication](#ipc-communication)
-5. [Application Flow](#application-flow)
-6. [Key Components](#key-components)
-7. [Data Flow](#data-flow)
+1. [Overview](#overview)
+2. [Electron Fundamentals](#electron-fundamentals)
+3. [Process Architecture](#process-architecture)
+4. [Project Structure](#project-structure)
+5. [Audio Pipeline](#audio-pipeline)
+6. [IPC Communication](#ipc-communication)
+7. [Application Flow](#application-flow)
+8. [Key Components](#key-components)
+9. [Data Flow](#data-flow)
+10. [Configuration](#configuration)
+
+---
+
+## Overview
+
+**Language Agent** is a cross-platform desktop application that provides real-time speech-to-text transcription with a floating subtitle overlay. It captures system audio (speaker output) and transcribes it using Deepgram's Nova-3 streaming API.
+
+**Primary Use Case**: Display live subtitles for any audio playing on your computer (videos, meetings, streams, etc.)
+
+**Tech Stack:**
+- **Framework**: Electron (Chromium + Node.js)
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Transcription**: Deepgram Nova-3 WebSocket API
+- **Audio Capture**: macOS ScreenCaptureKit (native Swift binary)
+- **Storage**: electron-store (JSON-based persistence)
 
 ---
 
 ## Electron Fundamentals
 
-Electron is a framework for building cross-platform desktop applications using web technologies (HTML, CSS, JavaScript/TypeScript). It combines Chromium (for rendering) and Node.js (for system access) into a single runtime.
+Electron combines Chromium (for rendering) and Node.js (for system access) into a single runtime.
 
 ### Key Concepts
 
@@ -28,7 +46,7 @@ Electron is a framework for building cross-platform desktop applications using w
 | **Context Isolation** | Security feature that separates the preload script's context from the renderer's context. |
 | **IPC** | Inter-Process Communication. How main and renderer processes talk to each other. |
 
-### Why This Architecture?
+### Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -39,7 +57,8 @@ Electron is a framework for building cross-platform desktop applications using w
 │  │  - Window management (create, position, show/hide)          ││
 │  │  - Application lifecycle (startup, shutdown)                ││
 │  │  - Persistent storage (electron-store)                      ││
-│  │  - External service connections (Deepgram WebSocket)        ││
+│  │  - Deepgram WebSocket connection                            ││
+│  │  - Native binary management (SystemAudioDump)               ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -52,18 +71,14 @@ Electron is a framework for building cross-platform desktop applications using w
 │  │  ┌─────────────────┐  │    │  ┌─────────────────────────┐  ││
 │  │  │ React Components│  │    │  │   React Components      │  ││
 │  │  │ - ControlPanel  │  │    │  │   - SubtitleOverlay     │  ││
-│  │  │ - History       │  │    │  │                         │  ││
+│  │  │ - TranscriptHist│  │    │  │                         │  ││
 │  │  └─────────────────┘  │    │  └─────────────────────────┘  ││
 │  │  - User interface     │    │  - Transparent window         ││
-│  │  - User interactions  │    │  - Displays transcriptions    ││
-│  │  - Settings UI        │    │  - Always on top              ││
+│  │  - Settings management│    │  - Displays transcriptions    ││
+│  │  - Start/stop control │    │  - Always on top              ││
 │  └───────────────────────┘    └───────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
-
-**Security**: Renderer processes are sandboxed and don't have direct access to Node.js APIs. This prevents malicious web content from accessing your file system.
-
-**Stability**: If a renderer crashes, it doesn't take down the entire app.
 
 ---
 
@@ -75,21 +90,10 @@ The main process is the entry point of the application. It:
 
 1. **Creates Windows**: Spawns BrowserWindow instances for control panel and overlay
 2. **Manages State**: Tracks transcription state (idle, starting, active, stopping)
-3. **Handles Audio**: Spawns native audio capture process, processes audio data
-4. **Connects to Services**: Manages WebSocket connection to Deepgram
+3. **Handles Audio**: Spawns native audio capture binary, processes audio data
+4. **Connects to Deepgram**: Manages WebSocket connection for real-time transcription
 5. **Stores Data**: Persists settings and transcripts using electron-store
 6. **Registers Shortcuts**: Global keyboard shortcuts that work even when app isn't focused
-
-```typescript
-// Simplified main process structure
-app.whenReady().then(() => {
-  createControlWindow();    // User interface window
-  createOverlayWindow();    // Transparent subtitle overlay
-  createTray();             // System tray icon
-  registerShortcuts();      // Global hotkeys
-  setupIpcHandlers();       // IPC message handlers
-});
-```
 
 ### Renderer Processes
 
@@ -97,14 +101,15 @@ Each window runs in its own renderer process:
 
 **Control Window** (`src/renderer/control/`)
 - React-based UI for controlling the app
-- Settings management
+- Settings management (API key, language, overlay style)
 - Transcript history viewing
-- Start/stop transcription
+- Start/stop transcription controls
 
 **Overlay Window** (`src/renderer/overlay/`)
 - Transparent, always-on-top window
 - Displays real-time subtitles
-- No user interaction (click-through)
+- Click-through (doesn't capture mouse events)
+- Positioned at bottom of screen
 
 ### Preload Scripts (`src/main/preload-*.ts`)
 
@@ -120,13 +125,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 ```
 
-The renderer can then use these methods:
-
-```typescript
-// In React component
-const result = await window.electronAPI.startTranscription();
-```
-
 ---
 
 ## Project Structure
@@ -134,46 +132,136 @@ const result = await window.electronAPI.startTranscription();
 ```
 language-agent/
 ├── src/
-│   ├── main/                    # Main process code
-│   │   ├── main.ts              # Entry point, window creation, IPC handlers
-│   │   ├── preload-control.ts   # Preload for control window
-│   │   ├── preload-overlay.ts   # Preload for overlay window
-│   │   └── deepgram-transcription.ts  # Deepgram WebSocket client
+│   ├── main/                      # Main process code
+│   │   ├── main.ts                # Entry point, window creation, IPC handlers
+│   │   ├── preload-control.ts     # Preload for control window
+│   │   ├── preload-overlay.ts     # Preload for overlay window
+│   │   ├── deepgram-transcription.ts  # Deepgram WebSocket client
+│   │   └── audio-capture.ts       # Audio capture utilities (unused)
 │   │
-│   ├── renderer/                # Renderer process code
-│   │   ├── control/             # Control panel window
-│   │   │   ├── index.html       # HTML entry point
-│   │   │   ├── index.tsx        # React entry point
-│   │   │   ├── ControlPanel.tsx # Main UI component
-│   │   │   ├── TranscriptHistory.tsx
-│   │   │   ├── useSystemAudio.ts # Audio capture hook
-│   │   │   └── styles.css       # Styles (with Tailwind)
+│   ├── renderer/                  # Renderer process code
+│   │   ├── control/               # Control panel window
+│   │   │   ├── index.html         # HTML entry point
+│   │   │   ├── index.tsx          # React entry point
+│   │   │   ├── ControlPanel.tsx   # Main UI component
+│   │   │   ├── TranscriptHistory.tsx  # Saved transcripts viewer
+│   │   │   ├── useSystemAudio.ts  # Audio capture hook (Windows)
+│   │   │   └── styles.css         # Tailwind styles
 │   │   │
-│   │   └── overlay/             # Overlay window
+│   │   └── overlay/               # Overlay window
 │   │       ├── index.html
 │   │       ├── index.tsx
 │   │       ├── SubtitleOverlay.tsx
 │   │       └── styles.css
 │   │
-│   └── shared/                  # Shared between main and renderer
-│       └── types.ts             # TypeScript types, constants, IPC channels
+│   └── shared/                    # Shared between main and renderer
+│       └── types.ts               # TypeScript types, IPC channels, constants
 │
-├── assets/                      # Native binaries, icons
-│   └── SystemAudioDump          # macOS audio capture binary
+├── assets/                        # Native binaries and resources
+│   ├── SystemAudioDump            # Compiled macOS audio capture binary
+│   ├── SystemAudioDump.swift      # Swift source for audio capture
+│   └── build-macos-binary.sh      # Build script for Swift binary
 │
-├── dist/                        # Compiled output (webpack)
-├── research/                    # Documentation
-├── webpack.main.config.js       # Main process bundling
-├── webpack.renderer.config.js   # Renderer process bundling
-├── tailwind.config.js           # Tailwind CSS config
+├── research/                      # Documentation
+│   ├── ARCHITECTURE.md            # This file
+│   └── audio-debugging-notes.md   # Audio pipeline debugging notes
+│
+├── dist/                          # Compiled output (webpack)
+├── webpack.main.config.js         # Main process bundling
+├── webpack.renderer.config.js     # Renderer process bundling
+├── tailwind.config.js             # Tailwind CSS config
+├── tsconfig.json                  # TypeScript config
 └── package.json
 ```
 
 ---
 
-## IPC Communication
+## Audio Pipeline
 
-IPC (Inter-Process Communication) is how the main and renderer processes communicate.
+### macOS System Audio Capture
+
+The application uses a native Swift binary (`SystemAudioDump`) built with ScreenCaptureKit to capture system audio output.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  macOS System Audio                                              │
+│  (Any app playing audio: browser, media player, etc.)           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  SystemAudioDump (Native Swift Binary)                           │
+│  - Uses ScreenCaptureKit API                                     │
+│  - Captures system audio output                                  │
+│  - Converts Float32 → Int16                                      │
+│  - Outputs to stdout                                             │
+│                                                                  │
+│  Output Format:                                                  │
+│  - Sample Rate: 24 kHz                                           │
+│  - Channels: 2 (Stereo, PLANAR format)                          │
+│  - Bit Depth: 16-bit signed integer                             │
+│  - Layout: [L0,L1,L2...Ln, R0,R1,R2...Rn] (NOT interleaved)    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ stdout (raw PCM bytes)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Main Process Audio Handler                                      │
+│                                                                  │
+│  1. Buffer incoming data                                         │
+│  2. Process in 20ms chunks (1920 bytes stereo)                  │
+│  3. Convert PLANAR stereo → mono (take first half)              │
+│  4. Result: 960 bytes mono per chunk                            │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ 24kHz mono Int16
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Deepgram WebSocket                                              │
+│  wss://api.deepgram.com/v1/listen                               │
+│                                                                  │
+│  Configuration:                                                  │
+│  - model: nova-3                                                │
+│  - encoding: linear16                                           │
+│  - sample_rate: 24000                                           │
+│  - channels: 1                                                  │
+│  - interim_results: true                                        │
+│  - punctuate: true                                              │
+│  - smart_format: true                                           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ JSON transcription results
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Overlay Window                                                  │
+│  - Displays interim results (updates in real-time)              │
+│  - Finalizes text when is_final=true                            │
+│  - Fades out after displayDuration                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Audio Format Constants
+
+```typescript
+const CAPTURE_SAMPLE_RATE = 24000;  // From native binary
+const CHANNELS = 2;                  // Stereo (planar format)
+const BYTES_PER_SAMPLE = 2;          // 16-bit
+const CHUNK_DURATION = 0.02;         // 20ms for low latency
+const CHUNK_SIZE = 1920;             // bytes per stereo chunk
+```
+
+### Stereo to Mono Conversion
+
+The native binary outputs **planar stereo** (all left samples, then all right samples), not interleaved stereo. The conversion simply takes the first half of each chunk:
+
+```typescript
+function convertStereoToMono(stereoBuffer: Buffer): Buffer {
+  // Planar: [L0, L1, L2..., R0, R1, R2...]
+  // Just take the first half (left channel)
+  return stereoBuffer.slice(0, stereoBuffer.length / 2);
+}
+```
+
+---
+
+## IPC Communication
 
 ### Communication Patterns
 
@@ -182,12 +270,10 @@ IPC (Inter-Process Communication) is how the main and renderer processes communi
 Used when renderer needs data from main or wants to trigger an action:
 
 ```typescript
-// Main process - handle the request
-ipcMain.handle('get-settings', () => {
-  return store.get('settings');
-});
+// Main process
+ipcMain.handle('get-settings', () => store.get('settings'));
 
-// Renderer process - invoke and await response
+// Renderer process
 const settings = await window.electronAPI.getSettings();
 ```
 
@@ -196,45 +282,32 @@ const settings = await window.electronAPI.getSettings();
 Used when main needs to push updates to renderer:
 
 ```typescript
-// Main process - send to specific window
-controlWindow.webContents.send('state-changed', newState);
+// Main process
+overlayWindow.webContents.send('transcription-update', result);
 
-// Renderer process (via preload) - listen for events
-ipcRenderer.on('state-changed', (event, state) => {
-  callback(state);
+// Renderer process (via preload)
+ipcRenderer.on('transcription-update', (event, result) => {
+  callback(result);
 });
 ```
 
-### IPC Channels in This App
+### IPC Channels
 
 All channel names are defined in `src/shared/types.ts`:
 
-```typescript
-export const IPC_CHANNELS = {
-  // Control → Main (actions)
-  START_TRANSCRIPTION: 'start-transcription',
-  STOP_TRANSCRIPTION: 'stop-transcription',
-  GET_SETTINGS: 'get-settings',
-  UPDATE_SETTINGS: 'update-settings',
-
-  // Main → Overlay (updates)
-  TRANSCRIPTION_UPDATE: 'transcription-update',
-  CLEAR_TRANSCRIPTION: 'clear-transcription',
-
-  // Main → Control (state updates)
-  STATE_CHANGED: 'state-changed',
-  ERROR_OCCURRED: 'error-occurred',
-
-  // Audio
-  START_SYSTEM_AUDIO: 'start-system-audio',
-  STOP_SYSTEM_AUDIO: 'stop-system-audio',
-
-  // Transcripts
-  GET_TRANSCRIPTS: 'get-transcripts',
-  DELETE_TRANSCRIPT: 'delete-transcript',
-  // ...
-};
-```
+| Channel | Direction | Purpose |
+|---------|-----------|---------|
+| `start-transcription` | Control → Main | Start transcription session |
+| `stop-transcription` | Control → Main | Stop transcription session |
+| `get-settings` | Control → Main | Retrieve app settings |
+| `update-settings` | Control → Main | Save app settings |
+| `start-system-audio` | Control → Main | Start native audio capture |
+| `stop-system-audio` | Control → Main | Stop native audio capture |
+| `transcription-update` | Main → Overlay | Send transcript to display |
+| `clear-transcription` | Main → Overlay | Clear subtitle display |
+| `state-changed` | Main → Control | Notify state transitions |
+| `get-transcripts` | Control → Main | Get saved transcript history |
+| `delete-transcript` | Control → Main | Delete a saved transcript |
 
 ---
 
@@ -265,60 +338,25 @@ export const IPC_CHANNELS = {
        │ startTranscription │                    │
        │───────────────────>│                    │
        │                    │                    │
-       │                    │ Connect to Deepgram│
-       │                    │ (WebSocket)        │
+       │                    │ 1. Connect to Deepgram (WebSocket)
        │                    │                    │
-       │                    │ Spawn SystemAudioDump
-       │                    │ (native binary)    │
+       │                    │ 2. Spawn SystemAudioDump
+       │                    │    (native binary)  │
        │                    │                    │
        │    state: active   │                    │
        │<───────────────────│                    │
        │                    │                    │
-       │                    │ Audio chunks flow  │
+       │                    │ 3. Audio chunks flow
        │                    │ ┌────────────────┐ │
        │                    │ │Native Binary   │ │
        │                    │ │→ Main Process  │ │
        │                    │ │→ Deepgram WS   │ │
        │                    │ └────────────────┘ │
        │                    │                    │
-       │                    │ Transcript received│
+       │                    │ 4. Transcript received
        │                    │───────────────────>│
        │                    │                    │
        │                    │                    │ Display subtitle
-       │                    │                    │
-```
-
-### Audio Data Flow
-
-```
-┌─────────────────┐
-│ System Audio    │  macOS: ScreenCaptureKit via native Swift binary
-│ (Speaker Output)│  Windows: WASAPI loopback via Electron
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ SystemAudioDump │  Outputs: Int16, 24kHz, Stereo, raw PCM
-│ (Native Binary) │  Writes to stdout
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Main Process    │  1. Reads from child process stdout
-│ Audio Handler   │  2. Converts stereo → mono
-│                 │  3. Buffers into 100ms chunks
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Deepgram        │  Real-time WebSocket streaming
-│ Transcription   │  Returns transcripts with is_final flag
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Overlay Window  │  Displays subtitle text
-└─────────────────┘
 ```
 
 ---
@@ -350,32 +388,24 @@ Key features:
 - Configures Nova-3 model with streaming settings
 - Handles interim and final transcripts
 - Sends keepalive messages to prevent timeout
-- Tracks diagnostic information
+- Tracks diagnostic information (chunks sent, transcripts received)
 
 ### ControlPanel (`src/renderer/control/ControlPanel.tsx`)
 
 Main React component for user interface:
-
-- State management with React hooks
-- Settings persistence via IPC
-- System audio capture control
-- Real-time diagnostics display
-
-### TranscriptHistory (`src/renderer/control/TranscriptHistory.tsx`)
-
-Displays saved transcription sessions:
-
-- Lists all past transcripts
-- Preview selected transcript
-- Delete/export functionality
+- Start/stop transcription button
+- API key configuration
+- Language selection
+- Overlay style settings
+- Real-time diagnostic display
 
 ### SubtitleOverlay (`src/renderer/overlay/SubtitleOverlay.tsx`)
 
 Displays real-time transcriptions:
-
 - Receives updates via IPC
-- Manages subtitle display timing
-- Handles different languages/fonts
+- Shows interim results (updates in place)
+- Finalizes and fades out completed segments
+- Supports CJK fonts for Asian languages
 
 ---
 
@@ -405,54 +435,37 @@ Data is stored in:
 
 When a transcription session ends:
 
-```typescript
-// During session - collect transcripts
-onTranscript: (result) => {
-  if (result.isFinal && result.text.trim()) {
-    currentSessionTranscripts.push(result.text.trim());
-  }
-}
-
-// On stop - save complete transcript
-const transcript: SavedTranscript = {
-  id: randomUUID(),
-  title: generateTranscriptTitle(...),
-  content: currentSessionTranscripts.join(' '),
-  duration: endTime - startTime,
-  wordCount: ...,
-  // ...
-};
-saveTranscript(transcript);
-```
+1. All final transcripts collected during session are joined
+2. Metadata generated (title, duration, word count)
+3. Saved to electron-store
+4. Available in transcript history view
 
 ---
 
-## Build System
+## Configuration
 
-### Webpack Configuration
+### Environment Requirements
 
-Two webpack configs handle different targets:
-
-**webpack.main.config.js**
-- Target: `electron-main`
-- Bundles main process code
-- Output: `dist/main/main.js`
-
-**webpack.renderer.config.js**
-- Target: `electron-renderer`
-- Bundles React apps for each window
-- Handles CSS with PostCSS/Tailwind
-- Output: `dist/renderer/{control,overlay}/`
+- **macOS**: 12.3+ (for ScreenCaptureKit)
+- **Node.js**: 18+
+- **Deepgram API Key**: Required for transcription
 
 ### Build Commands
 
 ```bash
-npm run build        # Build everything
-npm run build:main   # Build main process only
+npm run build         # Build everything
+npm run build:main    # Build main process only
 npm run build:renderer  # Build renderer processes only
-npm run dev          # Development mode with watch
-npm start            # Build and run
+npm run dev           # Development mode with watch
+npm start             # Build and run
 ```
+
+### Global Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+Shift+S` | Toggle transcription on/off |
+| `Cmd+Shift+H` | Show/hide overlay |
 
 ---
 
@@ -460,8 +473,8 @@ npm start            # Build and run
 
 1. **Context Isolation**: Enabled by default, prevents renderer from accessing Node.js
 2. **Preload Scripts**: Only expose necessary APIs via `contextBridge`
-3. **No Remote Module**: Disabled (deprecated and insecure)
-4. **Content Security Policy**: Should be added for production
+3. **API Key Storage**: Stored locally in electron-store (not transmitted except to Deepgram)
+4. **No Remote Content**: App doesn't load external web content
 
 ```typescript
 // Secure window creation
@@ -478,11 +491,12 @@ new BrowserWindow({
 
 ## Summary
 
-The Language Agent app follows standard Electron patterns:
+Language Agent follows standard Electron patterns:
 
-1. **Main process** handles system-level operations (audio, windows, storage)
+1. **Main process** handles system-level operations (audio capture, Deepgram connection, storage)
 2. **Renderer processes** handle UI (React components)
 3. **Preload scripts** provide secure bridge via IPC
-4. **Shared types** ensure type safety across processes
+4. **Native binary** captures system audio via ScreenCaptureKit
+5. **Shared types** ensure type safety across processes
 
-The audio flows from system → native binary → main process → Deepgram → overlay, with all coordination happening in the main process.
+The audio flows from system → native binary → main process (stereo→mono conversion) → Deepgram → overlay, with all coordination happening in the main process.

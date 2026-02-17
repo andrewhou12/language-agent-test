@@ -66,27 +66,20 @@ const DEBUG_SAVE_AUDIO = true;
 let debugAudioFile: fs.WriteStream | null = null;
 
 // Audio format constants
-// NOTE: ScreenCaptureKit returns MONO despite requesting stereo
+// Native binary outputs 24kHz stereo with identical L/R channels
 const CAPTURE_SAMPLE_RATE = 24000;  // From native binary
 const DEEPGRAM_SAMPLE_RATE = 16000; // Deepgram optimal rate
-const CHANNELS = 1; // ScreenCaptureKit returns mono on macOS
+const CHANNELS = 2; // Native binary outputs stereo
 const BYTES_PER_SAMPLE = 2; // 16-bit
 const CHUNK_DURATION = 0.02; // 20ms chunks for lowest latency
 const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 
 function convertStereoToMono(stereoBuffer: Buffer): Buffer {
-  const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair (2 bytes per channel)
-  const monoBuffer = Buffer.alloc(samples * 2);
-
-  for (let i = 0; i < samples; i++) {
-    // Average both channels for proper mono conversion
-    const leftSample = stereoBuffer.readInt16LE(i * 4);
-    const rightSample = stereoBuffer.readInt16LE(i * 4 + 2);
-    const monoSample = Math.round((leftSample + rightSample) / 2);
-    monoBuffer.writeInt16LE(monoSample, i * 2);
-  }
-
-  return monoBuffer;
+  // Native binary outputs PLANAR stereo: [L0, L1, L2..., R0, R1, R2...]
+  // NOT interleaved: [L0, R0, L1, R1...]
+  // Just take the first half (left channel)
+  const halfSize = stereoBuffer.length / 2;
+  return stereoBuffer.slice(0, halfSize);
 }
 
 /**
@@ -170,8 +163,10 @@ function startMacOSAudioCapture(): boolean {
         const chunk = audioBuffer.slice(0, CHUNK_SIZE);
         audioBuffer = audioBuffer.slice(CHUNK_SIZE);
 
-        // Process audio: resample from 24kHz to 16kHz (source is mono)
-        const resampledChunk = resampleAudio(chunk, CAPTURE_SAMPLE_RATE, DEEPGRAM_SAMPLE_RATE);
+        // Convert stereo to mono (extract left channel - L and R are identical)
+        const monoChunk = convertStereoToMono(chunk);
+        // Send at 24kHz directly (Deepgram is configured for 24kHz)
+        const resampledChunk = monoChunk;
         audioStats.chunksReceived++;
         audioStats.lastChunkTime = Date.now();
 

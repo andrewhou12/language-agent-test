@@ -4414,15 +4414,14 @@ class DeepgramTranscription {
             this.connection = deepgram.listen.live({
                 model: 'nova-3',
                 language: languageCode,
-                // Disabled for lower latency - these add processing overhead
-                smart_format: false,
-                punctuate: false,
+                smart_format: true,
+                punctuate: true,
                 interim_results: true,
-                // Aggressive endpointing for real-time subtitles
-                endpointing: 100,
-                vad_events: false,
+                utterance_end_ms: 1000,
+                endpointing: 300,
+                vad_events: true,
                 encoding: 'linear16',
-                sample_rate: 16000,
+                sample_rate: 24000, // Testing: send 24kHz directly without resampling
                 channels: 1,
             });
         }
@@ -4736,24 +4735,19 @@ let firstTranscriptTime = null;
 const DEBUG_SAVE_AUDIO = true;
 let debugAudioFile = null;
 // Audio format constants
-// NOTE: ScreenCaptureKit returns MONO despite requesting stereo
+// Native binary outputs 24kHz stereo with identical L/R channels
 const CAPTURE_SAMPLE_RATE = 24000; // From native binary
 const DEEPGRAM_SAMPLE_RATE = 16000; // Deepgram optimal rate
-const CHANNELS = 1; // ScreenCaptureKit returns mono on macOS
+const CHANNELS = 2; // Native binary outputs stereo
 const BYTES_PER_SAMPLE = 2; // 16-bit
 const CHUNK_DURATION = 0.02; // 20ms chunks for lowest latency
 const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 function convertStereoToMono(stereoBuffer) {
-    const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair (2 bytes per channel)
-    const monoBuffer = Buffer.alloc(samples * 2);
-    for (let i = 0; i < samples; i++) {
-        // Average both channels for proper mono conversion
-        const leftSample = stereoBuffer.readInt16LE(i * 4);
-        const rightSample = stereoBuffer.readInt16LE(i * 4 + 2);
-        const monoSample = Math.round((leftSample + rightSample) / 2);
-        monoBuffer.writeInt16LE(monoSample, i * 2);
-    }
-    return monoBuffer;
+    // Native binary outputs PLANAR stereo: [L0, L1, L2..., R0, R1, R2...]
+    // NOT interleaved: [L0, R0, L1, R1...]
+    // Just take the first half (left channel)
+    const halfSize = stereoBuffer.length / 2;
+    return stereoBuffer.slice(0, halfSize);
 }
 /**
  * Resample audio from one sample rate to another using linear interpolation
@@ -4820,8 +4814,10 @@ function startMacOSAudioCapture() {
             while (audioBuffer.length >= CHUNK_SIZE) {
                 const chunk = audioBuffer.slice(0, CHUNK_SIZE);
                 audioBuffer = audioBuffer.slice(CHUNK_SIZE);
-                // Process audio: resample from 24kHz to 16kHz (source is mono)
-                const resampledChunk = resampleAudio(chunk, CAPTURE_SAMPLE_RATE, DEEPGRAM_SAMPLE_RATE);
+                // Convert stereo to mono (extract left channel - L and R are identical)
+                const monoChunk = convertStereoToMono(chunk);
+                // Send at 24kHz directly (Deepgram is configured for 24kHz)
+                const resampledChunk = monoChunk;
                 audioStats.chunksReceived++;
                 audioStats.lastChunkTime = Date.now();
                 // Diagnostic: Log audio sample stats every 100 chunks

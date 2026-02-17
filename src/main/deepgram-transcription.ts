@@ -105,15 +105,14 @@ export class DeepgramTranscription {
       this.connection = deepgram.listen.live({
         model: 'nova-3',
         language: languageCode,
-        // Disabled for lower latency - these add processing overhead
-        smart_format: false,
-        punctuate: false,
+        smart_format: true,
+        punctuate: true,
         interim_results: true,
-        // Aggressive endpointing for real-time subtitles
-        endpointing: 100,
-        vad_events: false,
+        utterance_end_ms: 1000,
+        endpointing: 300,
+        vad_events: true,
         encoding: 'linear16',
-        sample_rate: 16000,
+        sample_rate: 24000,  // Testing: send 24kHz directly without resampling
         channels: 1,
       });
     } catch (error) {
