@@ -1,6 +1,7 @@
 export type TranscriptionState = 'idle' | 'starting' | 'active' | 'stopping';
 export type WhisperModel = 'tiny' | 'base' | 'small';
 export type SupportedLanguage = 'ja' | 'ko' | 'zh' | 'es' | 'fr' | 'de' | 'en' | 'auto';
+export type TranscriptionProvider = 'deepgram' | 'gladia';
 export interface TranscriptionResult {
     text: string;
     timestamp: number;
@@ -44,7 +45,9 @@ export interface OverlayStyle {
     displayDuration: number;
 }
 export interface AppSettings {
+    transcriptionProvider: TranscriptionProvider;
     deepgramApiKey: string;
+    gladiaApiKey: string;
     whisperModel: WhisperModel;
     language: SupportedLanguage;
     gpuAcceleration: boolean;
@@ -58,6 +61,7 @@ export interface AppSettings {
 export declare const DEFAULT_OVERLAY_STYLE: OverlayStyle;
 export declare const DEFAULT_SETTINGS: AppSettings;
 export declare const LANGUAGE_NAMES: Record<SupportedLanguage, string>;
+export declare const PROVIDER_NAMES: Record<TranscriptionProvider, string>;
 export declare const MODEL_INFO: Record<WhisperModel, {
     size: string;
     speed: string;

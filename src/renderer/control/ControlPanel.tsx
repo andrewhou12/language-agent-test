@@ -3,7 +3,9 @@ import {
   AppSettings,
   TranscriptionState,
   SupportedLanguage,
+  TranscriptionProvider,
   LANGUAGE_NAMES,
+  PROVIDER_NAMES,
 } from '../../shared/types';
 import type { ControlAPI } from '../../main/preload-control';
 import { useSystemAudio } from './useSystemAudio';
@@ -51,6 +53,7 @@ export function ControlPanel(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [gladiaApiKeyInput, setGladiaApiKeyInput] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsData | null>(null);
@@ -79,6 +82,7 @@ export function ControlPanel(): React.ReactElement {
         setState(currentState);
         setSettings(currentSettings);
         setApiKeyInput(currentSettings.deepgramApiKey || '');
+        setGladiaApiKeyInput(currentSettings.gladiaApiKey || '');
       } catch (err) {
         setError('Failed to load settings');
       } finally {
@@ -170,6 +174,16 @@ export function ControlPanel(): React.ReactElement {
     [settings]
   );
 
+  const handleProviderChange = useCallback(
+    async (provider: TranscriptionProvider) => {
+      if (!settings) return;
+
+      const updated = await window.electronAPI.updateSettings({ transcriptionProvider: provider });
+      setSettings(updated);
+    },
+    [settings]
+  );
+
   const handleApiKeyChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setApiKeyInput(e.target.value);
   }, []);
@@ -181,6 +195,14 @@ export function ControlPanel(): React.ReactElement {
     setSettings(updated);
     setError(null);
   }, [settings, apiKeyInput]);
+
+  const handleGladiaApiKeySave = useCallback(async () => {
+    if (!settings) return;
+
+    const updated = await window.electronAPI.updateSettings({ gladiaApiKey: gladiaApiKeyInput });
+    setSettings(updated);
+    setError(null);
+  }, [settings, gladiaApiKeyInput]);
 
   if (isLoading || !settings) {
     return (
@@ -195,7 +217,8 @@ export function ControlPanel(): React.ReactElement {
 
   const isTransitioning = state === 'starting' || state === 'stopping';
   const isActive = state === 'active';
-  const hasApiKey = !!settings.deepgramApiKey;
+  const provider = settings.transcriptionProvider || 'deepgram';
+  const hasApiKey = provider === 'deepgram' ? !!settings.deepgramApiKey : !!settings.gladiaApiKey;
 
   return (
     <div className="control-panel">
@@ -209,7 +232,7 @@ export function ControlPanel(): React.ReactElement {
         <div className="api-key-section">
           <div className="api-key-warning">
             <span className="warning-icon">⚠️</span>
-            <span>Deepgram API key required</span>
+            <span>{PROVIDER_NAMES[provider]} API key required</span>
           </div>
         </div>
       )}
@@ -251,30 +274,81 @@ export function ControlPanel(): React.ReactElement {
       <div className="settings-section">
         <div className="settings-group">
           <h3>API Configuration</h3>
-          <div className="setting-row api-key-row">
-            <span className="setting-label">Deepgram API Key</span>
-            <div className="api-key-input-wrapper">
-              <input
-                type={showApiKey ? 'text' : 'password'}
-                value={apiKeyInput}
-                onChange={handleApiKeyChange}
-                placeholder="Enter your Deepgram API key"
-                className="api-key-input"
+          <div className="setting-row">
+            <span className="setting-label">Provider</span>
+            <div className="select-wrapper">
+              <select
+                value={provider}
+                onChange={(e) => handleProviderChange(e.target.value as TranscriptionProvider)}
                 disabled={isActive}
-              />
-              <button
-                className="api-key-toggle"
-                onClick={() => setShowApiKey(!showApiKey)}
-                type="button"
               >
-                {showApiKey ? '🙈' : '👁️'}
-              </button>
+                {Object.entries(PROVIDER_NAMES).map(([code, name]) => (
+                  <option key={code} value={code}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          {apiKeyInput !== settings.deepgramApiKey && (
-            <button className="save-api-key-button" onClick={handleApiKeySave}>
-              Save API Key
-            </button>
+
+          {provider === 'deepgram' && (
+            <>
+              <div className="setting-row api-key-row">
+                <span className="setting-label">Deepgram API Key</span>
+                <div className="api-key-input-wrapper">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={apiKeyInput}
+                    onChange={handleApiKeyChange}
+                    placeholder="Enter your Deepgram API key"
+                    className="api-key-input"
+                    disabled={isActive}
+                  />
+                  <button
+                    className="api-key-toggle"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    type="button"
+                  >
+                    {showApiKey ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+              {apiKeyInput !== settings.deepgramApiKey && (
+                <button className="save-api-key-button" onClick={handleApiKeySave}>
+                  Save API Key
+                </button>
+              )}
+            </>
+          )}
+
+          {provider === 'gladia' && (
+            <>
+              <div className="setting-row api-key-row">
+                <span className="setting-label">Gladia API Key</span>
+                <div className="api-key-input-wrapper">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={gladiaApiKeyInput}
+                    onChange={(e) => setGladiaApiKeyInput(e.target.value)}
+                    placeholder="Enter your Gladia API key"
+                    className="api-key-input"
+                    disabled={isActive}
+                  />
+                  <button
+                    className="api-key-toggle"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    type="button"
+                  >
+                    {showApiKey ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+              {gladiaApiKeyInput !== settings.gladiaApiKey && (
+                <button className="save-api-key-button" onClick={handleGladiaApiKeySave}>
+                  Save API Key
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -343,7 +417,7 @@ export function ControlPanel(): React.ReactElement {
 
               {diagnostics.deepgram && (
                 <div className="diagnostics-section" style={{ marginTop: '10px' }}>
-                  <strong>Deepgram Connection:</strong>
+                  <strong>{PROVIDER_NAMES[provider]} Connection:</strong>
                   <div>
                     State:{' '}
                     <span style={{ color: diagnostics.deepgram.connectionState === 'connected' ? '#4caf50' : diagnostics.deepgram.connectionState === 'error' ? '#f44336' : '#ff9800' }}>
@@ -356,14 +430,16 @@ export function ControlPanel(): React.ReactElement {
                   <div>Audio Chunks Sent: {diagnostics.deepgram.audioChunksSent}</div>
                   <div>Audio Bytes Sent: {(diagnostics.deepgram.audioBytesSent / 1024).toFixed(1)} KB</div>
                   <div>Transcripts Received: {diagnostics.deepgram.transcriptsReceived}</div>
-                  <div>KeepAlives Sent: {diagnostics.deepgram.keepAlivesSent}</div>
+                  {diagnostics.deepgram.keepAlivesSent !== undefined && (
+                    <div>KeepAlives Sent: {diagnostics.deepgram.keepAlivesSent}</div>
+                  )}
                   <div>Last Transcript: {diagnostics.deepgram.lastTranscriptTime ? new Date(diagnostics.deepgram.lastTranscriptTime).toLocaleTimeString() : 'Never'}</div>
                 </div>
               )}
 
               {!diagnostics.deepgram && state === 'active' && (
                 <div style={{ color: '#f44336', marginTop: '10px' }}>
-                  Warning: No Deepgram service data available
+                  Warning: No transcription service data available
                 </div>
               )}
             </div>

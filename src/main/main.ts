@@ -23,7 +23,9 @@ import {
   IPC_CHANNELS,
 } from '../shared/types';
 import { randomUUID } from 'crypto';
+import { TranscriptionService, TranscriptionDiagnostics } from './transcription-service';
 import { DeepgramTranscription, DiagnosticInfo } from './deepgram-transcription';
+import { GladiaTranscription } from './gladia-transcription';
 
 // Initialize settings store
 const store = new Store<{ settings: AppSettings; transcripts: SavedTranscript[] }>({
@@ -40,7 +42,8 @@ let tray: Tray | null = null;
 
 // State
 let transcriptionState: TranscriptionState = 'idle';
-let transcriptionService: DeepgramTranscription | null = null;
+let transcriptionService: TranscriptionService | null = null;
+let activeProvider: 'deepgram' | 'gladia' | null = null;
 
 // Current session tracking
 let currentSessionStartTime: number | null = null;
@@ -74,11 +77,12 @@ const BYTES_PER_SAMPLE = 2; // 16-bit
 const CHUNK_DURATION = 0.02; // 20ms chunks for lowest latency
 const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 
-// Deepgram pricing (nova-3 Pay-as-you-go rate per minute)
-const DEEPGRAM_COST_PER_MINUTE = 0.0043;
+// Transcription provider pricing (per minute)
+const DEEPGRAM_COST_PER_MINUTE = 0.0043;  // nova-3 Pay-as-you-go
+const GLADIA_COST_PER_MINUTE = 0.000611;   // Gladia standard rate
 
 // Cumulative session cost tracking
-let totalDeepgramCost = 0;
+let totalTranscriptionCost = 0;
 
 function convertStereoToMono(stereoBuffer: Buffer): Buffer {
   // Native binary outputs PLANAR stereo: [L0, L1, L2..., R0, R1, R2...]
@@ -462,15 +466,26 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
   try {
     updateState('starting');
     const settings = getSettings();
+    const provider = settings.transcriptionProvider || 'deepgram';
 
-    console.log('[Main] Settings loaded, API key length:', settings.deepgramApiKey?.length || 0);
+    console.log('[Main] Selected provider:', provider);
     console.log('[Main] Language:', settings.language);
 
-    // Check for API key
-    if (!settings.deepgramApiKey) {
-      console.error('[Main] No API key set');
-      updateState('idle');
-      return { success: false, error: 'Please set your Deepgram API key in settings' };
+    // Check for API key based on provider
+    if (provider === 'deepgram') {
+      if (!settings.deepgramApiKey) {
+        console.error('[Main] No Deepgram API key set');
+        updateState('idle');
+        return { success: false, error: 'Please set your Deepgram API key in settings' };
+      }
+      console.log('[Main] Deepgram API key length:', settings.deepgramApiKey?.length || 0);
+    } else if (provider === 'gladia') {
+      if (!settings.gladiaApiKey) {
+        console.error('[Main] No Gladia API key set');
+        updateState('idle');
+        return { success: false, error: 'Please set your Gladia API key in settings' };
+      }
+      console.log('[Main] Gladia API key length:', settings.gladiaApiKey?.length || 0);
     }
 
     // Reset audio stats and timing
@@ -486,13 +501,23 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
     // Initialize session tracking
     currentSessionStartTime = Date.now();
     currentSessionTranscripts = [];
+    activeProvider = provider;
 
-    // Initialize transcription service
-    console.log('[Main] Creating DeepgramTranscription service...');
-    transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language);
+    // Initialize transcription service based on provider
+    if (provider === 'deepgram') {
+      console.log('[Main] Creating DeepgramTranscription service...');
+      transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language);
+    } else if (provider === 'gladia') {
+      console.log('[Main] Creating GladiaTranscription service...');
+      transcriptionService = new GladiaTranscription(settings.gladiaApiKey, settings.language);
+    }
 
-    // Start Deepgram WebSocket connection
-    console.log('[Main] Starting Deepgram connection...');
+    if (!transcriptionService) {
+      throw new Error(`Unknown provider: ${provider}`);
+    }
+
+    // Start transcription connection
+    console.log(`[Main] Starting ${provider} connection...`);
     await transcriptionService.start({
       onTranscript: (result) => {
         // Log first transcript timing
@@ -510,18 +535,18 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
         }
       },
       onError: (error) => {
-        console.error('[Main] Deepgram error callback:', error.message);
+        console.error(`[Main] ${activeProvider} error callback:`, error.message);
         controlWindow?.webContents.send(IPC_CHANNELS.ERROR_OCCURRED, error.message);
       },
       onOpen: () => {
-        console.log('[Main] Deepgram onOpen callback - connection established');
+        console.log(`[Main] ${activeProvider} onOpen callback - connection established`);
       },
       onClose: () => {
-        console.log('[Main] Deepgram onClose callback - connection closed');
+        console.log(`[Main] ${activeProvider} onClose callback - connection closed`);
       },
     });
 
-    console.log('[Main] Deepgram connection started successfully');
+    console.log(`[Main] ${activeProvider} connection started successfully`);
 
     // Show overlay
     overlayWindow?.show();
@@ -552,18 +577,23 @@ async function stopTranscription(): Promise<{ success: boolean }> {
   const sessionDuration = currentSessionStartTime ? (Date.now() - currentSessionStartTime) / 1000 : 0;
   const audioSeconds = (audioStats.chunksSentToDeepgram * CHUNK_DURATION);
   const audioMinutes = audioSeconds / 60;
-  const sessionCost = audioMinutes * DEEPGRAM_COST_PER_MINUTE;
-  totalDeepgramCost += sessionCost;
 
+  // Calculate cost based on active provider
+  const costPerMinute = activeProvider === 'gladia' ? GLADIA_COST_PER_MINUTE : DEEPGRAM_COST_PER_MINUTE;
+  const providerName = activeProvider === 'gladia' ? 'Gladia' : 'Deepgram (nova-3)';
+  const sessionCost = audioMinutes * costPerMinute;
+  totalTranscriptionCost += sessionCost;
+
+  console.log(`[STATS] Provider: ${activeProvider}`);
   console.log(`[STATS] Session duration: ${sessionDuration.toFixed(1)}s`);
   console.log(`[STATS] Audio sent: ${audioSeconds.toFixed(1)}s (${audioStats.chunksSentToDeepgram} chunks)`);
   console.log(`[STATS] Real-time ratio: ${(audioSeconds / sessionDuration).toFixed(2)}x`);
   console.log(`[STATS] Chunks received from native: ${audioStats.chunksReceived}`);
-  console.log(`[COST] Session cost (nova-3): $${sessionCost.toFixed(6)} (${audioMinutes.toFixed(2)} minutes @ $${DEEPGRAM_COST_PER_MINUTE}/min)`);
-  console.log(`[COST] Total cumulative cost this app session: $${totalDeepgramCost.toFixed(6)}`);
+  console.log(`[COST] Session cost (${providerName}): $${sessionCost.toFixed(6)} (${audioMinutes.toFixed(2)} minutes @ $${costPerMinute}/min)`);
+  console.log(`[COST] Total cumulative cost this app session: $${totalTranscriptionCost.toFixed(6)}`);
 
   try {
-    // Stop Deepgram connection
+    // Stop transcription connection
     if (transcriptionService) {
       await transcriptionService.stop();
       transcriptionService = null;
@@ -595,6 +625,7 @@ async function stopTranscription(): Promise<{ success: boolean }> {
     // Reset session tracking
     currentSessionStartTime = null;
     currentSessionTranscripts = [];
+    activeProvider = null;
 
     // Hide overlay
     overlayWindow?.hide();

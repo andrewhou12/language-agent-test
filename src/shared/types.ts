@@ -14,6 +14,8 @@ export type SupportedLanguage =
   | 'en' // English
   | 'auto'; // Auto-detect
 
+export type TranscriptionProvider = 'deepgram' | 'gladia';
+
 export interface TranscriptionResult {
   text: string;
   timestamp: number;
@@ -58,8 +60,12 @@ export interface OverlayStyle {
 }
 
 export interface AppSettings {
+  // Provider selection
+  transcriptionProvider: TranscriptionProvider;
+
   // API settings
   deepgramApiKey: string;
+  gladiaApiKey: string;
 
   // Model settings
   whisperModel: WhisperModel;
@@ -96,7 +102,9 @@ export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  transcriptionProvider: 'deepgram',
   deepgramApiKey: '',
+  gladiaApiKey: '',
   whisperModel: 'base',
   language: 'auto',
   gpuAcceleration: true,
@@ -117,6 +125,11 @@ export const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
   de: 'German',
   en: 'English',
   auto: 'Auto-detect',
+};
+
+export const PROVIDER_NAMES: Record<TranscriptionProvider, string> = {
+  deepgram: 'Deepgram',
+  gladia: 'Gladia',
 };
 
 export const MODEL_INFO: Record<WhisperModel, { size: string; speed: string; accuracy: string }> = {

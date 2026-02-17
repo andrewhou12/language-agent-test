@@ -22,6 +22,7 @@
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "autoprefixer": "^10.4.24",
@@ -47,7 +48,8 @@
     "@deepgram/sdk": "^3.9.0",
     "electron-store": "^8.1.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "ws": "^8.19.0"
   },
   "build": {
     "appId": "com.languageagent.app",

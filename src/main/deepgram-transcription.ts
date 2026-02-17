@@ -7,34 +7,25 @@
 
 import { createClient, LiveTranscriptionEvents, ListenLiveClient } from '@deepgram/sdk';
 import { SupportedLanguage, TranscriptionResult } from '../shared/types';
+import { TranscriptionService, TranscriptionCallbacks, TranscriptionDiagnostics } from './transcription-service';
 
-export interface DeepgramTranscriptionCallbacks {
-  onTranscript: (result: TranscriptionResult) => void;
-  onError: (error: Error) => void;
-  onOpen: () => void;
-  onClose: () => void;
-}
-
-export interface DiagnosticInfo {
-  connectionState: 'disconnected' | 'connecting' | 'connected' | 'error';
-  lastError: string | null;
-  audioChunksSent: number;
-  audioBytesSent: number;
-  transcriptsReceived: number;
-  lastTranscriptTime: number | null;
+export interface DeepgramDiagnosticInfo extends TranscriptionDiagnostics {
   keepAlivesSent: number;
 }
 
-export class DeepgramTranscription {
+// Alias for backward compatibility
+export type DiagnosticInfo = DeepgramDiagnosticInfo;
+
+export class DeepgramTranscription implements TranscriptionService {
   private connection: ListenLiveClient | null = null;
   private apiKey: string;
   private language: SupportedLanguage;
-  private callbacks: DeepgramTranscriptionCallbacks | null = null;
+  private callbacks: TranscriptionCallbacks | null = null;
   private keepAliveInterval: NodeJS.Timeout | null = null;
   private isConnected: boolean = false;
 
   // Diagnostic tracking
-  private diagnostics: DiagnosticInfo = {
+  private diagnostics: DeepgramDiagnosticInfo = {
     connectionState: 'disconnected',
     lastError: null,
     audioChunksSent: 0,
@@ -62,14 +53,14 @@ export class DeepgramTranscription {
   /**
    * Get current diagnostic information
    */
-  getDiagnostics(): DiagnosticInfo {
+  getDiagnostics(): DeepgramDiagnosticInfo {
     return { ...this.diagnostics };
   }
 
   /**
    * Start the WebSocket connection to Deepgram
    */
-  async start(callbacks: DeepgramTranscriptionCallbacks): Promise<void> {
+  async start(callbacks: TranscriptionCallbacks): Promise<void> {
     if (!this.apiKey) {
       const error = 'Deepgram API key not set';
       console.error('[Deepgram]', error);

@@ -11,7 +11,7 @@
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_OVERLAY_STYLE = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_OVERLAY_STYLE = void 0;
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
     fontFamily: 'system-ui, "Noto Sans CJK", sans-serif',
@@ -26,7 +26,9 @@ exports.DEFAULT_OVERLAY_STYLE = {
     displayDuration: 5,
 };
 exports.DEFAULT_SETTINGS = {
+    transcriptionProvider: 'deepgram',
     deepgramApiKey: '',
+    gladiaApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
@@ -46,6 +48,10 @@ exports.LANGUAGE_NAMES = {
     de: 'German',
     en: 'English',
     auto: 'Auto-detect',
+};
+exports.PROVIDER_NAMES = {
+    deepgram: 'Deepgram',
+    gladia: 'Gladia',
 };
 exports.MODEL_INFO = {
     tiny: { size: '~75MB', speed: 'Fastest', accuracy: 'Good' },
