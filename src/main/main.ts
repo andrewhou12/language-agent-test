@@ -382,12 +382,13 @@ function createOverlayWindow(): void {
     // Bubble mode: use saved bubble state
     windowWidth = bubbleState.width;
     windowHeight = bubbleState.height;
+    // Center horizontally if x === -1
     windowX = bubbleState.x === -1
       ? Math.floor((screenWidth - windowWidth) / 2)
       : bubbleState.x;
-    // Position lower on screen (like classic captions)
+    // Center vertically if y === -1
     windowY = bubbleState.y === -1
-      ? Math.floor(screenHeight * 0.85 - windowHeight)
+      ? Math.floor((screenHeight - windowHeight) / 2)
       : bubbleState.y;
     isResizable = true;
   }
@@ -761,12 +762,12 @@ function setupIpcHandlers(): void {
         overlayWindow.setResizable(true);
         overlayWindow.setIgnoreMouseEvents(false);
 
-        // Position centered-lower if not set, otherwise use saved position
+        // Position centered if not set, otherwise use saved position
         if (bubbleState.x === -1 || bubbleState.y === -1) {
           const primaryDisplay = screen.getPrimaryDisplay();
           const { width: sw, height: sh } = primaryDisplay.workAreaSize;
           const x = Math.floor((sw - bubbleState.width) / 2);
-          const y = Math.floor(sh * 0.85 - bubbleState.height);
+          const y = Math.floor((sh - bubbleState.height) / 2);
           overlayWindow.setPosition(x, y);
         } else {
           overlayWindow.setPosition(bubbleState.x, bubbleState.y);
@@ -969,12 +970,12 @@ function setupIpcHandlers(): void {
         overlayWindow.setResizable(true);
         overlayWindow.setIgnoreMouseEvents(false);
 
-        // Position centered-lower if not set, otherwise use saved position
+        // Position centered if not set, otherwise use saved position
         if (bubbleState.x === -1 || bubbleState.y === -1) {
           const primaryDisplay = screen.getPrimaryDisplay();
           const { width: sw, height: sh } = primaryDisplay.workAreaSize;
           const x = Math.floor((sw - bubbleState.width) / 2);
-          const y = Math.floor(sh * 0.85 - bubbleState.height);
+          const y = Math.floor((sh - bubbleState.height) / 2);
           overlayWindow.setPosition(x, y);
         } else {
           overlayWindow.setPosition(bubbleState.x, bubbleState.y);
