@@ -74,6 +74,12 @@ const BYTES_PER_SAMPLE = 2; // 16-bit
 const CHUNK_DURATION = 0.02; // 20ms chunks for lowest latency
 const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 
+// Deepgram pricing (nova-3 Pay-as-you-go rate per minute)
+const DEEPGRAM_COST_PER_MINUTE = 0.0043;
+
+// Cumulative session cost tracking
+let totalDeepgramCost = 0;
+
 function convertStereoToMono(stereoBuffer: Buffer): Buffer {
   // Native binary outputs PLANAR stereo: [L0, L1, L2..., R0, R1, R2...]
   // NOT interleaved: [L0, R0, L1, R1...]
@@ -545,10 +551,16 @@ async function stopTranscription(): Promise<{ success: boolean }> {
   // Log session statistics
   const sessionDuration = currentSessionStartTime ? (Date.now() - currentSessionStartTime) / 1000 : 0;
   const audioSeconds = (audioStats.chunksSentToDeepgram * CHUNK_DURATION);
+  const audioMinutes = audioSeconds / 60;
+  const sessionCost = audioMinutes * DEEPGRAM_COST_PER_MINUTE;
+  totalDeepgramCost += sessionCost;
+
   console.log(`[STATS] Session duration: ${sessionDuration.toFixed(1)}s`);
   console.log(`[STATS] Audio sent: ${audioSeconds.toFixed(1)}s (${audioStats.chunksSentToDeepgram} chunks)`);
   console.log(`[STATS] Real-time ratio: ${(audioSeconds / sessionDuration).toFixed(2)}x`);
   console.log(`[STATS] Chunks received from native: ${audioStats.chunksReceived}`);
+  console.log(`[COST] Session cost (nova-3): $${sessionCost.toFixed(6)} (${audioMinutes.toFixed(2)} minutes @ $${DEEPGRAM_COST_PER_MINUTE}/min)`);
+  console.log(`[COST] Total cumulative cost this app session: $${totalDeepgramCost.toFixed(6)}`);
 
   try {
     // Stop Deepgram connection
