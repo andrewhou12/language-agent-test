@@ -11,11 +11,15 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.8);
-  border-radius: 12px;
+  background: rgba(30, 30, 30, 0.45);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border-radius: 16px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 /* Header / Drag Handle */
@@ -24,7 +28,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   cursor: move;
   -webkit-app-region: drag;
   user-select: none;
@@ -84,11 +89,14 @@
 
 /* Collapsed State */
 .bubble-container.collapsed {
-  border-radius: 16px;
+  border-radius: 20px;
+  background: rgba(30, 30, 30, 0.5);
 }
 
 .bubble-container.collapsed .bubble-header {
   padding: 6px 12px;
+  background: transparent;
+  border-bottom: none;
 }
 
 /* Transcript Content */
