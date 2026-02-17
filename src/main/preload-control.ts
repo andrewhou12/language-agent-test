@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { AppSettings, TranscriptionState, IPC_CHANNELS } from '../shared/types';
+import { AppSettings, TranscriptionState, SavedTranscript, IPC_CHANNELS } from '../shared/types';
 
 // Define the API exposed to the renderer
 export interface ControlAPI {
@@ -16,13 +16,11 @@ export interface ControlAPI {
 
   // Audio
   getDesktopSources: () => Promise<Electron.DesktopCapturerSource[]>;
-  transcribeAudio: (audioData: ArrayBuffer) => Promise<{ text: string } | null>;
 
   // System audio capture
   startSystemAudio: () => Promise<{ success: boolean; platform?: string; error?: string }>;
   stopSystemAudio: () => Promise<{ success: boolean }>;
-  sendAudioData: (base64Data: string) => Promise<{ text: string } | null>;
-  onSystemAudioData: (callback: (data: { data: string }) => void) => void;
+  streamAudioChunk: (base64Data: string) => Promise<{ success: boolean }>;
 
   // Settings
   getSettings: () => Promise<AppSettings>;
@@ -30,6 +28,15 @@ export interface ControlAPI {
 
   // State
   getState: () => Promise<TranscriptionState>;
+
+  // Diagnostics
+  getDiagnostics: () => Promise<any>;
+
+  // Transcript history
+  getTranscripts: () => Promise<SavedTranscript[]>;
+  getTranscript: (id: string) => Promise<SavedTranscript | null>;
+  deleteTranscript: (id: string) => Promise<boolean>;
+  exportTranscript: (id: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
 
   // Event listeners
   onStateChanged: (callback: (state: TranscriptionState) => void) => void;
@@ -47,17 +54,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Audio
   getDesktopSources: () => ipcRenderer.invoke(IPC_CHANNELS.GET_DESKTOP_SOURCES),
-  transcribeAudio: (audioData: ArrayBuffer) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TRANSCRIBE_AUDIO, audioData),
 
   // System audio capture
   startSystemAudio: () => ipcRenderer.invoke(IPC_CHANNELS.START_SYSTEM_AUDIO),
   stopSystemAudio: () => ipcRenderer.invoke(IPC_CHANNELS.STOP_SYSTEM_AUDIO),
-  sendAudioData: (base64Data: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SEND_AUDIO_DATA, base64Data),
-  onSystemAudioData: (callback: (data: { data: string }) => void) => {
-    ipcRenderer.on(IPC_CHANNELS.SYSTEM_AUDIO_DATA, (_event, data) => callback(data));
-  },
+  streamAudioChunk: (base64Data: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.STREAM_AUDIO_CHUNK, base64Data),
 
   // Settings
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS),
@@ -66,6 +68,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // State
   getState: () => ipcRenderer.invoke(IPC_CHANNELS.GET_STATE),
+
+  // Diagnostics
+  getDiagnostics: () => ipcRenderer.invoke(IPC_CHANNELS.GET_DIAGNOSTICS),
+
+  // Transcript history
+  getTranscripts: () => ipcRenderer.invoke(IPC_CHANNELS.GET_TRANSCRIPTS),
+  getTranscript: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_TRANSCRIPT, id),
+  deleteTranscript: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_TRANSCRIPT, id),
+  exportTranscript: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.EXPORT_TRANSCRIPT, id),
 
   // Event listeners
   onStateChanged: (callback: (state: TranscriptionState) => void) => {
@@ -80,6 +91,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   removeAllListeners: () => {
     ipcRenderer.removeAllListeners(IPC_CHANNELS.STATE_CHANGED);
     ipcRenderer.removeAllListeners(IPC_CHANNELS.ERROR_OCCURRED);
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.SYSTEM_AUDIO_DATA);
   },
 } as ControlAPI);

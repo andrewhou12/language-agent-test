@@ -4,7 +4,7 @@
  * Exposes a safe, limited API to the renderer process
  * using contextBridge for secure IPC communication.
  */
-import { AppSettings, TranscriptionState } from '../shared/types';
+import { AppSettings, TranscriptionState, SavedTranscript } from '../shared/types';
 export interface ControlAPI {
     startTranscription: () => Promise<{
         success: boolean;
@@ -14,9 +14,6 @@ export interface ControlAPI {
         success: boolean;
     }>;
     getDesktopSources: () => Promise<Electron.DesktopCapturerSource[]>;
-    transcribeAudio: (audioData: ArrayBuffer) => Promise<{
-        text: string;
-    } | null>;
     startSystemAudio: () => Promise<{
         success: boolean;
         platform?: string;
@@ -25,15 +22,21 @@ export interface ControlAPI {
     stopSystemAudio: () => Promise<{
         success: boolean;
     }>;
-    sendAudioData: (base64Data: string) => Promise<{
-        text: string;
-    } | null>;
-    onSystemAudioData: (callback: (data: {
-        data: string;
-    }) => void) => void;
+    streamAudioChunk: (base64Data: string) => Promise<{
+        success: boolean;
+    }>;
     getSettings: () => Promise<AppSettings>;
     updateSettings: (settings: Partial<AppSettings>) => Promise<AppSettings>;
     getState: () => Promise<TranscriptionState>;
+    getDiagnostics: () => Promise<any>;
+    getTranscripts: () => Promise<SavedTranscript[]>;
+    getTranscript: (id: string) => Promise<SavedTranscript | null>;
+    deleteTranscript: (id: string) => Promise<boolean>;
+    exportTranscript: (id: string) => Promise<{
+        success: boolean;
+        filePath?: string;
+        error?: string;
+    }>;
     onStateChanged: (callback: (state: TranscriptionState) => void) => void;
     onError: (callback: (error: string) => void) => void;
     removeAllListeners: () => void;

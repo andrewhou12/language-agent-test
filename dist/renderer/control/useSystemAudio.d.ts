@@ -2,8 +2,10 @@
  * Custom hook for capturing system audio
  *
  * Platform-specific implementations:
- * - macOS: Uses native Swift binary (SystemAudioDump) via IPC
+ * - macOS: Uses native Swift binary (SystemAudioDump) via main process
+ *          Audio is streamed directly to Deepgram from main process
  * - Windows: Uses Electron's WASAPI loopback via getDisplayMedia
+ *            Audio chunks are sent to main process for Deepgram streaming
  *
  * Setup required:
  * - macOS: Screen Recording permission + SystemAudioDump binary in assets/

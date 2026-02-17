@@ -2,8 +2,10 @@
  * Custom hook for capturing system audio
  *
  * Platform-specific implementations:
- * - macOS: Uses native Swift binary (SystemAudioDump) via IPC
+ * - macOS: Uses native Swift binary (SystemAudioDump) via main process
+ *          Audio is streamed directly to Deepgram from main process
  * - Windows: Uses Electron's WASAPI loopback via getDisplayMedia
+ *            Audio chunks are sent to main process for Deepgram streaming
  *
  * Setup required:
  * - macOS: Screen Recording permission + SystemAudioDump binary in assets/
@@ -19,10 +21,11 @@ declare global {
   }
 }
 
-// Audio format constants (matching main process)
+// Audio format constants (matching main process and Deepgram config)
 const SAMPLE_RATE = 24000;
 const BUFFER_SIZE = 4096;
-const CHUNK_DURATION_MS = 2000; // Send for transcription every 2 seconds
+// Stream audio in smaller chunks for real-time transcription (100ms)
+const STREAM_INTERVAL_MS = 100;
 
 interface UseSystemAudioOptions {
   onError?: (error: string) => void;
@@ -44,29 +47,11 @@ export function useSystemAudio(options: UseSystemAudioOptions = {}): UseSystemAu
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const audioBufferRef = useRef<Int16Array[]>([]);
-  const sendIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // macOS audio data listener
-  useEffect(() => {
-    const handleMacOSAudioData = async (data: { data: string }) => {
-      if (!isCapturingRef.current || platformRef.current !== 'darwin') return;
-
-      // macOS sends pre-processed mono 16-bit PCM at 24kHz
-      // Accumulate and send periodically
-      const pcmData = base64ToInt16Array(data.data);
-      audioBufferRef.current.push(pcmData);
-    };
-
-    window.electronAPI.onSystemAudioData(handleMacOSAudioData);
-
-    return () => {
-      // Cleanup handled by removeAllListeners
-    };
-  }, []);
-
-  // Periodically send accumulated audio for transcription
-  const startSendInterval = useCallback(() => {
-    sendIntervalRef.current = setInterval(async () => {
+  // Periodically stream accumulated audio to main process (Windows only)
+  const startStreamInterval = useCallback(() => {
+    streamIntervalRef.current = setInterval(async () => {
       if (audioBufferRef.current.length === 0) return;
 
       // Combine all buffered audio
@@ -79,41 +64,21 @@ export function useSystemAudio(options: UseSystemAudioOptions = {}): UseSystemAu
       }
       audioBufferRef.current = [];
 
-      // Check for silence (simple VAD)
-      let maxAmp = 0;
-      for (let i = 0; i < combined.length; i++) {
-        const abs = Math.abs(combined[i]);
-        if (abs > maxAmp) maxAmp = abs;
-      }
-
-      console.log('Audio max amplitude:', maxAmp, '(16-bit range: 0-32767)');
-
-      // Skip if too quiet (threshold for 16-bit audio)
-      // 100 is very conservative - should catch most speech
-      if (maxAmp < 100) {
-        console.log('Audio too quiet, skipping');
-        return;
-      }
-
-      // Convert to base64 and send
+      // Convert to base64 and stream to main process
       const base64Data = int16ArrayToBase64(combined);
-      console.log('Sending audio for transcription, samples:', combined.length);
 
       try {
-        const result = await window.electronAPI.sendAudioData(base64Data);
-        if (result) {
-          console.log('Transcription:', result.text);
-        }
+        await window.electronAPI.streamAudioChunk(base64Data);
       } catch (error) {
-        console.error('Transcription error:', error);
+        console.error('Error streaming audio:', error);
       }
-    }, CHUNK_DURATION_MS);
+    }, STREAM_INTERVAL_MS);
   }, []);
 
-  const stopSendInterval = useCallback(() => {
-    if (sendIntervalRef.current) {
-      clearInterval(sendIntervalRef.current);
-      sendIntervalRef.current = null;
+  const stopStreamInterval = useCallback(() => {
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
     }
     audioBufferRef.current = [];
   }, []);
@@ -200,23 +165,24 @@ export function useSystemAudio(options: UseSystemAudioOptions = {}): UseSystemAu
       console.log('Platform:', platformRef.current);
 
       if (result.platform === 'darwin') {
-        // macOS: Audio comes via IPC from native binary
-        // Just start the send interval
-        console.log('macOS audio capture started via native binary');
+        // macOS: Audio is captured and streamed to Deepgram directly in main process
+        // Nothing to do here in the renderer
+        console.log('macOS audio capture started via native binary (main process handles streaming)');
       } else if (result.platform === 'win32') {
-        // Windows: Need to start renderer-side capture
+        // Windows: Need to start renderer-side capture and stream to main process
         const success = await startWindowsCapture();
         if (!success) {
           await window.electronAPI.stopSystemAudio();
           return false;
         }
+        // Start streaming audio chunks to main process
+        startStreamInterval();
       } else {
         onError?.('Unsupported platform');
         return false;
       }
 
       isCapturingRef.current = true;
-      startSendInterval();
       console.log('System audio capture started');
       return true;
     } catch (error) {
@@ -224,13 +190,13 @@ export function useSystemAudio(options: UseSystemAudioOptions = {}): UseSystemAu
       onError?.(error instanceof Error ? error.message : 'Failed to start capture');
       return false;
     }
-  }, [onError, startWindowsCapture, startSendInterval]);
+  }, [onError, startWindowsCapture, startStreamInterval]);
 
   const stopCapture = useCallback(() => {
     console.log('Stopping system audio capture...');
     isCapturingRef.current = false;
 
-    stopSendInterval();
+    stopStreamInterval();
 
     if (platformRef.current === 'win32') {
       stopWindowsCapture();
@@ -241,7 +207,7 @@ export function useSystemAudio(options: UseSystemAudioOptions = {}): UseSystemAu
     platformRef.current = null;
 
     console.log('System audio capture stopped');
-  }, [stopSendInterval, stopWindowsCapture]);
+  }, [stopStreamInterval, stopWindowsCapture]);
 
   return { startCapture, stopCapture, isCapturing: isCapturingRef.current };
 }
@@ -255,15 +221,6 @@ function convertFloat32ToInt16(float32Array: Float32Array): Int16Array {
     int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
   return int16Array;
-}
-
-function base64ToInt16Array(base64: string): Int16Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Int16Array(bytes.buffer);
 }
 
 function int16ArrayToBase64(int16Array: Int16Array): string {

@@ -6,6 +6,19 @@ export interface TranscriptionResult {
     timestamp: number;
     confidence: number;
     language?: string;
+    isFinal?: boolean;
+    speechFinal?: boolean;
+}
+export interface SavedTranscript {
+    id: string;
+    title: string;
+    content: string;
+    language: SupportedLanguage;
+    startTime: number;
+    endTime: number;
+    duration: number;
+    wordCount: number;
+    createdAt: number;
 }
 export interface OverlayPosition {
     x: number;
@@ -31,7 +44,7 @@ export interface OverlayStyle {
     displayDuration: number;
 }
 export interface AppSettings {
-    openaiApiKey: string;
+    deepgramApiKey: string;
     whisperModel: WhisperModel;
     language: SupportedLanguage;
     gpuAcceleration: boolean;
@@ -61,11 +74,16 @@ export declare const IPC_CHANNELS: {
     readonly START_SYSTEM_AUDIO: "start-system-audio";
     readonly STOP_SYSTEM_AUDIO: "stop-system-audio";
     readonly SYSTEM_AUDIO_DATA: "system-audio-data";
-    readonly SEND_AUDIO_DATA: "send-audio-data";
+    readonly STREAM_AUDIO_CHUNK: "stream-audio-chunk";
     readonly TRANSCRIPTION_UPDATE: "transcription-update";
     readonly CLEAR_TRANSCRIPTION: "clear-transcription";
     readonly UPDATE_OVERLAY_STYLE: "update-overlay-style";
     readonly STATE_CHANGED: "state-changed";
     readonly ERROR_OCCURRED: "error-occurred";
+    readonly GET_DIAGNOSTICS: "get-diagnostics";
+    readonly GET_TRANSCRIPTS: "get-transcripts";
+    readonly GET_TRANSCRIPT: "get-transcript";
+    readonly DELETE_TRANSCRIPT: "delete-transcript";
+    readonly EXPORT_TRANSCRIPT: "export-transcript";
 };
 //# sourceMappingURL=types.d.ts.map

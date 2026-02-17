@@ -14,6 +14,7 @@ interface SubtitleEntry {
   text: string;
   timestamp: number;
   isFadingOut: boolean;
+  isFinal: boolean;
 }
 
 export function SubtitleOverlay(): React.ReactElement {
@@ -57,23 +58,65 @@ export function SubtitleOverlay(): React.ReactElement {
   // Handle incoming transcription
   const handleTranscription = useCallback(
     (result: TranscriptionResult) => {
-      const id = nextIdRef.current++;
-      const newEntry: SubtitleEntry = {
-        id,
-        text: result.text,
-        timestamp: result.timestamp,
-        isFadingOut: false,
-      };
-
       setSubtitles((prev) => {
-        // Keep only the most recent entries (maxLines - 1) plus the new one
-        const maxToKeep = style.maxLines;
-        const kept = prev.slice(-(maxToKeep - 1));
-        return [...kept, newEntry];
+        // Find the last non-final entry (current interim)
+        const lastInterimIndex = prev.findIndex((s) => !s.isFinal && !s.isFadingOut);
+
+        if (result.isFinal) {
+          // Final result: replace any interim with this final version
+          if (lastInterimIndex !== -1) {
+            // Replace interim with final
+            const updated = [...prev];
+            updated[lastInterimIndex] = {
+              ...updated[lastInterimIndex],
+              text: result.text,
+              isFinal: true,
+            };
+            // Schedule fade-out for the now-final entry
+            scheduleRemoval(updated[lastInterimIndex].id, style.displayDuration);
+            return updated;
+          } else {
+            // No interim to replace, add as new final entry
+            const id = nextIdRef.current++;
+            const newEntry: SubtitleEntry = {
+              id,
+              text: result.text,
+              timestamp: result.timestamp,
+              isFadingOut: false,
+              isFinal: true,
+            };
+            scheduleRemoval(id, style.displayDuration);
+            const maxToKeep = style.maxLines;
+            const kept = prev.slice(-(maxToKeep - 1));
+            return [...kept, newEntry];
+          }
+        } else {
+          // Interim result: update existing interim or create new one
+          if (lastInterimIndex !== -1) {
+            // Update existing interim in place
+            const updated = [...prev];
+            updated[lastInterimIndex] = {
+              ...updated[lastInterimIndex],
+              text: result.text,
+            };
+            return updated;
+          } else {
+            // Create new interim entry
+            const id = nextIdRef.current++;
+            const newEntry: SubtitleEntry = {
+              id,
+              text: result.text,
+              timestamp: result.timestamp,
+              isFadingOut: false,
+              isFinal: false,
+            };
+            const maxToKeep = style.maxLines;
+            const kept = prev.slice(-(maxToKeep - 1));
+            return [...kept, newEntry];
+          }
+        }
       });
 
-      // Schedule this subtitle to fade out
-      scheduleRemoval(id, style.displayDuration);
       setIsListening(true);
     },
     [style.maxLines, style.displayDuration, scheduleRemoval]

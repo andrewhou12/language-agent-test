@@ -12,20 +12,24 @@ import {
 } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import Store from 'electron-store';
 import {
   AppSettings,
   DEFAULT_SETTINGS,
   TranscriptionState,
   TranscriptionResult,
+  SavedTranscript,
   IPC_CHANNELS,
 } from '../shared/types';
-import { OpenAITranscription } from './openai-transcription';
+import { randomUUID } from 'crypto';
+import { DeepgramTranscription, DiagnosticInfo } from './deepgram-transcription';
 
 // Initialize settings store
-const store = new Store<{ settings: AppSettings }>({
+const store = new Store<{ settings: AppSettings; transcripts: SavedTranscript[] }>({
   defaults: {
     settings: DEFAULT_SETTINGS,
+    transcripts: [],
   },
 });
 
@@ -36,28 +40,75 @@ let tray: Tray | null = null;
 
 // State
 let transcriptionState: TranscriptionState = 'idle';
-let transcriptionService: OpenAITranscription | null = null;
+let transcriptionService: DeepgramTranscription | null = null;
+
+// Current session tracking
+let currentSessionStartTime: number | null = null;
+let currentSessionTranscripts: string[] = [];
 
 // macOS system audio capture
 let systemAudioProc: ChildProcess | null = null;
 
-// Audio format constants (matching DESKTOP_AUDIO_CAPTURE_RESEARCH.md)
-const SAMPLE_RATE = 24000;
-const CHANNELS = 2; // stereo from native binary
+// Audio diagnostics
+let audioStats = {
+  chunksReceived: 0,
+  bytesReceived: 0,
+  chunksSentToDeepgram: 0,
+  lastChunkTime: 0,
+};
+
+// Timing diagnostics
+let firstAudioChunkTime: number | null = null;
+let firstTranscriptTime: number | null = null;
+
+// Debug: Write audio to file for analysis
+const DEBUG_SAVE_AUDIO = true;
+let debugAudioFile: fs.WriteStream | null = null;
+
+// Audio format constants
+// Native binary outputs 24kHz stereo with identical L/R channels
+const CAPTURE_SAMPLE_RATE = 24000;  // From native binary
+const DEEPGRAM_SAMPLE_RATE = 16000; // Deepgram optimal rate
+const CHANNELS = 2; // Native binary outputs stereo
 const BYTES_PER_SAMPLE = 2; // 16-bit
-const CHUNK_DURATION = 0.1; // 100ms chunks
-const CHUNK_SIZE = SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
+const CHUNK_DURATION = 0.02; // 20ms chunks for lowest latency
+const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DURATION;
 
 function convertStereoToMono(stereoBuffer: Buffer): Buffer {
-  const samples = stereoBuffer.length / 4; // 4 bytes per stereo sample pair
-  const monoBuffer = Buffer.alloc(samples * 2);
+  // Native binary outputs PLANAR stereo: [L0, L1, L2..., R0, R1, R2...]
+  // NOT interleaved: [L0, R0, L1, R1...]
+  // Just take the first half (left channel)
+  const halfSize = stereoBuffer.length / 2;
+  return stereoBuffer.slice(0, halfSize);
+}
 
-  for (let i = 0; i < samples; i++) {
-    const leftSample = stereoBuffer.readInt16LE(i * 4);
-    monoBuffer.writeInt16LE(leftSample, i * 2);
+/**
+ * Resample audio from one sample rate to another using linear interpolation
+ * This matches Deepgram's expected 16kHz sample rate (as used in their example app)
+ */
+function resampleAudio(inputBuffer: Buffer, fromRate: number, toRate: number): Buffer {
+  if (fromRate === toRate) return inputBuffer;
+
+  const inputSamples = inputBuffer.length / 2; // 16-bit = 2 bytes per sample
+  const ratio = fromRate / toRate;
+  const outputSamples = Math.floor(inputSamples / ratio);
+  const outputBuffer = Buffer.alloc(outputSamples * 2);
+
+  for (let i = 0; i < outputSamples; i++) {
+    const srcIndex = i * ratio;
+    const srcIndexFloor = Math.floor(srcIndex);
+    const srcIndexCeil = Math.min(srcIndexFloor + 1, inputSamples - 1);
+    const fraction = srcIndex - srcIndexFloor;
+
+    // Linear interpolation between samples
+    const sample1 = inputBuffer.readInt16LE(srcIndexFloor * 2);
+    const sample2 = inputBuffer.readInt16LE(srcIndexCeil * 2);
+    const interpolated = Math.round(sample1 * (1 - fraction) + sample2 * fraction);
+
+    outputBuffer.writeInt16LE(interpolated, i * 2);
   }
 
-  return monoBuffer;
+  return outputBuffer;
 }
 
 function startMacOSAudioCapture(): boolean {
@@ -70,8 +121,14 @@ function startMacOSAudioCapture(): boolean {
 
   console.log('Starting macOS audio capture, binary path:', binaryPath);
 
+  // Debug: Create audio file for analysis
+  if (DEBUG_SAVE_AUDIO) {
+    const debugPath = path.join(app.getPath('desktop'), 'debug-audio-16khz.pcm');
+    debugAudioFile = fs.createWriteStream(debugPath);
+    console.log('[DEBUG] Saving processed audio to:', debugPath);
+  }
+
   // Check if binary exists
-  const fs = require('fs');
   if (!fs.existsSync(binaryPath)) {
     console.error('SystemAudioDump binary not found at:', binaryPath);
     return false;
@@ -88,25 +145,69 @@ function startMacOSAudioCapture(): boolean {
 
     systemAudioProc.stdout?.on('data', (data: Buffer) => {
       totalBytesReceived += data.length;
+      audioStats.bytesReceived = totalBytesReceived;
+
       if (totalBytesReceived % 50000 < data.length) {
-        console.log('Audio data received, total bytes:', totalBytesReceived);
+        console.log('[AudioCapture] Data received, total bytes:', totalBytesReceived);
       }
 
       audioBuffer = Buffer.concat([audioBuffer, data]);
+
+      // Log buffer size to detect backlog
+      if (audioBuffer.length > CHUNK_SIZE * 10) {
+        console.warn(`[BACKLOG] Audio buffer size: ${audioBuffer.length} bytes (${(audioBuffer.length / CHUNK_SIZE).toFixed(1)} chunks pending)`);
+      }
 
       // Process in chunks
       while (audioBuffer.length >= CHUNK_SIZE) {
         const chunk = audioBuffer.slice(0, CHUNK_SIZE);
         audioBuffer = audioBuffer.slice(CHUNK_SIZE);
 
-        // Convert stereo to mono
+        // Convert stereo to mono (extract left channel - L and R are identical)
         const monoChunk = convertStereoToMono(chunk);
+        // Send at 24kHz directly (Deepgram is configured for 24kHz)
+        const resampledChunk = monoChunk;
+        audioStats.chunksReceived++;
+        audioStats.lastChunkTime = Date.now();
 
-        // Convert to base64 for IPC
-        const base64Data = monoChunk.toString('base64');
+        // Diagnostic: Log audio sample stats every 100 chunks
+        if (audioStats.chunksReceived % 100 === 1) {
+          let maxSample = 0;
+          let minSample = 0;
+          for (let i = 0; i < resampledChunk.length; i += 2) {
+            const sample = resampledChunk.readInt16LE(i);
+            if (sample > maxSample) maxSample = sample;
+            if (sample < minSample) minSample = sample;
+          }
+          console.log(`[AudioDiag] Chunk #${audioStats.chunksReceived}: samples=${resampledChunk.length / 2}, min=${minSample}, max=${maxSample}, range=${maxSample - minSample}`);
+        }
 
-        // Send to renderer
-        controlWindow?.webContents.send(IPC_CHANNELS.SYSTEM_AUDIO_DATA, { data: base64Data });
+        // Debug: Save audio to file for analysis
+        if (DEBUG_SAVE_AUDIO && debugAudioFile) {
+          debugAudioFile.write(resampledChunk);
+        }
+
+        // Send directly to Deepgram if connected
+        if (transcriptionService?.connected) {
+          // Log first chunk timing
+          if (audioStats.chunksSentToDeepgram === 0) {
+            firstAudioChunkTime = Date.now();
+            console.log(`[TIMING] First audio chunk sent to Deepgram at ${firstAudioChunkTime}`);
+          }
+
+          transcriptionService.send(resampledChunk);
+          audioStats.chunksSentToDeepgram++;
+
+          // Log every 50 chunks
+          if (audioStats.chunksSentToDeepgram % 50 === 0) {
+            console.log(`[AudioCapture] Sent ${audioStats.chunksSentToDeepgram} chunks to Deepgram, chunk size: ${resampledChunk.length} bytes`);
+          }
+        } else {
+          // Log when we can't send - this helps diagnose connection issues
+          if (audioStats.chunksReceived % 100 === 1) {
+            console.warn('[AudioCapture] Cannot send to Deepgram - not connected. Service exists:', !!transcriptionService, 'Connected:', transcriptionService?.connected);
+          }
+        }
       }
     });
 
@@ -138,6 +239,13 @@ function stopMacOSAudioCapture(): void {
     systemAudioProc = null;
     console.log('macOS audio capture stopped');
   }
+
+  // Close debug audio file
+  if (debugAudioFile) {
+    debugAudioFile.end();
+    debugAudioFile = null;
+    console.log('[DEBUG] Audio file saved to desktop');
+  }
 }
 
 function setupWindowsLoopbackHandler(): void {
@@ -159,6 +267,40 @@ function setupWindowsLoopbackHandler(): void {
 
 function getSettings(): AppSettings {
   return store.get('settings');
+}
+
+// Transcript storage functions
+function getTranscripts(): SavedTranscript[] {
+  return store.get('transcripts') || [];
+}
+
+function saveTranscript(transcript: SavedTranscript): void {
+  const transcripts = getTranscripts();
+  transcripts.unshift(transcript); // Add to beginning (most recent first)
+  store.set('transcripts', transcripts);
+}
+
+function deleteTranscript(id: string): boolean {
+  const transcripts = getTranscripts();
+  const index = transcripts.findIndex(t => t.id === id);
+  if (index !== -1) {
+    transcripts.splice(index, 1);
+    store.set('transcripts', transcripts);
+    return true;
+  }
+  return false;
+}
+
+function getTranscriptById(id: string): SavedTranscript | null {
+  const transcripts = getTranscripts();
+  return transcripts.find(t => t.id === id) || null;
+}
+
+function generateTranscriptTitle(content: string, language: string): string {
+  const date = new Date();
+  const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  return `${dateStr} at ${timeStr}`;
 }
 
 function updateSettings(newSettings: Partial<AppSettings>): AppSettings {
@@ -304,7 +446,10 @@ async function toggleTranscription(): Promise<void> {
 }
 
 async function startTranscription(): Promise<{ success: boolean; error?: string }> {
+  console.log('[Main] startTranscription called, current state:', transcriptionState);
+
   if (transcriptionState !== 'idle') {
+    console.log('[Main] Cannot start - not idle');
     return { success: false, error: 'Already running or transitioning' };
   }
 
@@ -312,26 +457,80 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
     updateState('starting');
     const settings = getSettings();
 
+    console.log('[Main] Settings loaded, API key length:', settings.deepgramApiKey?.length || 0);
+    console.log('[Main] Language:', settings.language);
+
     // Check for API key
-    if (!settings.openaiApiKey) {
+    if (!settings.deepgramApiKey) {
+      console.error('[Main] No API key set');
       updateState('idle');
-      return { success: false, error: 'Please set your OpenAI API key in settings' };
+      return { success: false, error: 'Please set your Deepgram API key in settings' };
     }
 
+    // Reset audio stats and timing
+    audioStats = {
+      chunksReceived: 0,
+      bytesReceived: 0,
+      chunksSentToDeepgram: 0,
+      lastChunkTime: 0,
+    };
+    firstAudioChunkTime = null;
+    firstTranscriptTime = null;
+
+    // Initialize session tracking
+    currentSessionStartTime = Date.now();
+    currentSessionTranscripts = [];
+
     // Initialize transcription service
-    transcriptionService = new OpenAITranscription(settings.openaiApiKey, settings.language);
+    console.log('[Main] Creating DeepgramTranscription service...');
+    transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language);
+
+    // Start Deepgram WebSocket connection
+    console.log('[Main] Starting Deepgram connection...');
+    await transcriptionService.start({
+      onTranscript: (result) => {
+        // Log first transcript timing
+        if (!firstTranscriptTime) {
+          firstTranscriptTime = Date.now();
+          const latency = firstAudioChunkTime ? firstTranscriptTime - firstAudioChunkTime : 'N/A';
+          console.log(`[TIMING] First transcript received at ${firstTranscriptTime}`);
+          console.log(`[TIMING] Latency from first audio to first transcript: ${latency}ms`);
+        }
+        console.log('[Main] Received transcript, sending to overlay:', result.text);
+        sendTranscriptionToOverlay(result);
+        // Track final transcripts for saving
+        if (result.isFinal && result.text.trim()) {
+          currentSessionTranscripts.push(result.text.trim());
+        }
+      },
+      onError: (error) => {
+        console.error('[Main] Deepgram error callback:', error.message);
+        controlWindow?.webContents.send(IPC_CHANNELS.ERROR_OCCURRED, error.message);
+      },
+      onOpen: () => {
+        console.log('[Main] Deepgram onOpen callback - connection established');
+      },
+      onClose: () => {
+        console.log('[Main] Deepgram onClose callback - connection closed');
+      },
+    });
+
+    console.log('[Main] Deepgram connection started successfully');
 
     // Show overlay
     overlayWindow?.show();
+    console.log('[Main] Overlay shown');
 
     updateState('active');
+    console.log('[Main] State updated to active');
     return { success: true };
   } catch (error) {
-    console.error('Failed to start transcription:', error);
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[Main] Failed to start transcription:', errorMsg);
     updateState('idle');
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMsg,
     };
   }
 }
@@ -343,9 +542,47 @@ async function stopTranscription(): Promise<{ success: boolean }> {
 
   updateState('stopping');
 
+  // Log session statistics
+  const sessionDuration = currentSessionStartTime ? (Date.now() - currentSessionStartTime) / 1000 : 0;
+  const audioSeconds = (audioStats.chunksSentToDeepgram * CHUNK_DURATION);
+  console.log(`[STATS] Session duration: ${sessionDuration.toFixed(1)}s`);
+  console.log(`[STATS] Audio sent: ${audioSeconds.toFixed(1)}s (${audioStats.chunksSentToDeepgram} chunks)`);
+  console.log(`[STATS] Real-time ratio: ${(audioSeconds / sessionDuration).toFixed(2)}x`);
+  console.log(`[STATS] Chunks received from native: ${audioStats.chunksReceived}`);
+
   try {
-    // Cleanup transcription service
-    transcriptionService = null;
+    // Stop Deepgram connection
+    if (transcriptionService) {
+      await transcriptionService.stop();
+      transcriptionService = null;
+    }
+
+    // Save transcript if we have content
+    if (currentSessionTranscripts.length > 0 && currentSessionStartTime) {
+      const settings = getSettings();
+      const endTime = Date.now();
+      const content = currentSessionTranscripts.join(' ');
+      const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
+
+      const transcript: SavedTranscript = {
+        id: randomUUID(),
+        title: generateTranscriptTitle(content, settings.language),
+        content,
+        language: settings.language,
+        startTime: currentSessionStartTime,
+        endTime,
+        duration: Math.round((endTime - currentSessionStartTime) / 1000),
+        wordCount,
+        createdAt: Date.now(),
+      };
+
+      saveTranscript(transcript);
+      console.log('[Main] Saved transcript:', transcript.id, 'with', wordCount, 'words');
+    }
+
+    // Reset session tracking
+    currentSessionStartTime = null;
+    currentSessionTranscripts = [];
 
     // Hide overlay
     overlayWindow?.hide();
@@ -408,29 +645,19 @@ function setupIpcHandlers(): void {
     return sources;
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRANSCRIBE_AUDIO, async (_, audioData: ArrayBuffer) => {
-    console.log('Received audio for transcription, size:', audioData?.byteLength || 0);
-
-    if (!transcriptionService || transcriptionState !== 'active') {
-      console.log('Transcription service not ready or not active');
-      return null;
+  // Stream audio chunk directly to Deepgram (for Windows/renderer-side capture)
+  ipcMain.handle(IPC_CHANNELS.STREAM_AUDIO_CHUNK, async (_, base64Data: string) => {
+    if (!transcriptionService?.connected || transcriptionState !== 'active') {
+      return { success: false };
     }
 
     try {
-      const buffer = Buffer.from(audioData);
-      console.log('Calling OpenAI Whisper API...');
-      const result = await transcriptionService.transcribe(buffer);
-      console.log('Transcription result:', result);
-
-      if (result && result.text.trim()) {
-        sendTranscriptionToOverlay(result);
-        return { text: result.text };
-      }
-
-      return null;
+      const audioBuffer = Buffer.from(base64Data, 'base64');
+      transcriptionService.send(audioBuffer);
+      return { success: true };
     } catch (error) {
-      console.error('Transcription error:', error);
-      return null;
+      console.error('Error streaming audio chunk:', error);
+      return { success: false };
     }
   });
 
@@ -454,65 +681,84 @@ function setupIpcHandlers(): void {
     return { success: true };
   });
 
-  // Receive audio data from renderer (Windows) for transcription
-  ipcMain.handle(IPC_CHANNELS.SEND_AUDIO_DATA, async (_, base64Data: string) => {
-    if (!transcriptionService || transcriptionState !== 'active') {
-      return null;
+  // Diagnostics handler
+  ipcMain.handle(IPC_CHANNELS.GET_DIAGNOSTICS, () => {
+    const deepgramDiagnostics = transcriptionService?.getDiagnostics() || null;
+    return {
+      platform: process.platform,
+      transcriptionState,
+      deepgram: deepgramDiagnostics,
+      audio: {
+        ...audioStats,
+        systemAudioProcRunning: !!systemAudioProc,
+        systemAudioProcPid: systemAudioProc?.pid || null,
+      },
+    };
+  });
+
+  // Transcript history handlers
+  ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPTS, () => {
+    return getTranscripts();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GET_TRANSCRIPT, (_, id: string) => {
+    return getTranscriptById(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DELETE_TRANSCRIPT, (_, id: string) => {
+    return deleteTranscript(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXPORT_TRANSCRIPT, async (_, id: string) => {
+    const transcript = getTranscriptById(id);
+    if (!transcript) return { success: false, error: 'Transcript not found' };
+
+    const { dialog } = require('electron');
+
+    const result = await dialog.showSaveDialog(controlWindow!, {
+      defaultPath: `transcript-${transcript.id.slice(0, 8)}.txt`,
+      filters: [
+        { name: 'Text Files', extensions: ['txt'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: 'Export cancelled' };
     }
 
     try {
-      // Convert base64 to buffer
-      const audioBuffer = Buffer.from(base64Data, 'base64');
+      const exportContent = [
+        `Transcript: ${transcript.title}`,
+        `Date: ${new Date(transcript.createdAt).toLocaleString()}`,
+        `Duration: ${formatDuration(transcript.duration)}`,
+        `Word Count: ${transcript.wordCount}`,
+        `Language: ${transcript.language}`,
+        '',
+        '---',
+        '',
+        transcript.content,
+      ].join('\n');
 
-      // The audio is 16-bit PCM at 24kHz - convert to WAV for Whisper
-      const wavBuffer = createWavFromPcm(audioBuffer, SAMPLE_RATE);
-
-      const result = await transcriptionService.transcribe(wavBuffer);
-
-      if (result && result.text.trim()) {
-        sendTranscriptionToOverlay(result);
-        return { text: result.text };
-      }
-
-      return null;
+      fs.writeFileSync(result.filePath, exportContent, 'utf-8');
+      return { success: true, filePath: result.filePath };
     } catch (error) {
-      console.error('Transcription error:', error);
-      return null;
+      return { success: false, error: 'Failed to write file' };
     }
   });
 }
 
-function createWavFromPcm(pcmData: Buffer, sampleRate: number): Buffer {
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const bytesPerSample = bitsPerSample / 8;
-  const blockAlign = numChannels * bytesPerSample;
-  const byteRate = sampleRate * blockAlign;
-  const dataSize = pcmData.length;
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
 
-  const buffer = Buffer.alloc(44 + dataSize);
-
-  // RIFF header
-  buffer.write('RIFF', 0);
-  buffer.writeUInt32LE(36 + dataSize, 4);
-  buffer.write('WAVE', 8);
-
-  // fmt chunk
-  buffer.write('fmt ', 12);
-  buffer.writeUInt32LE(16, 16); // chunk size
-  buffer.writeUInt16LE(1, 20); // audio format (PCM)
-  buffer.writeUInt16LE(numChannels, 22);
-  buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(byteRate, 28);
-  buffer.writeUInt16LE(blockAlign, 32);
-  buffer.writeUInt16LE(bitsPerSample, 34);
-
-  // data chunk
-  buffer.write('data', 36);
-  buffer.writeUInt32LE(dataSize, 40);
-  pcmData.copy(buffer, 44);
-
-  return buffer;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${secs}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${secs}s`;
+  }
+  return `${secs}s`;
 }
 
 // App lifecycle
