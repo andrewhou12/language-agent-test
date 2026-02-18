@@ -424,8 +424,13 @@ function createOverlayWindow(): void {
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   }
 
-  // Set window level to float above other windows
-  overlayWindow.setAlwaysOnTop(true, 'floating');
+  // Set window level to float above other windows, including fullscreen apps
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  // Make visible on all workspaces including fullscreen spaces (macOS)
+  if (process.platform === 'darwin') {
+    overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
 
   // Save position/size when window moves or resizes (only relevant for bubble mode)
   overlayWindow.on('moved', () => {
@@ -754,12 +759,14 @@ function setupIpcHandlers(): void {
         overlayWindow.setSize(width, height);
         overlayWindow.setPosition(0, 0);
         overlayWindow.setResizable(false);
+        overlayWindow.setMovable(false);
         overlayWindow.setIgnoreMouseEvents(true, { forward: true });
       } else {
         // Bubble mode: restore bubble state
         const bubbleState = updated.bubbleState || DEFAULT_BUBBLE_STATE;
         overlayWindow.setSize(bubbleState.width, bubbleState.height);
         overlayWindow.setResizable(true);
+        overlayWindow.setMovable(true);
         overlayWindow.setIgnoreMouseEvents(false);
 
         // Position centered if not set, otherwise use saved position
@@ -962,12 +969,14 @@ function setupIpcHandlers(): void {
         overlayWindow.setSize(width, height);
         overlayWindow.setPosition(0, 0);
         overlayWindow.setResizable(false);
+        overlayWindow.setMovable(false);
         overlayWindow.setIgnoreMouseEvents(true, { forward: true });
       } else {
         // Bubble mode: restore bubble state
         const bubbleState = settings.bubbleState || DEFAULT_BUBBLE_STATE;
         overlayWindow.setSize(bubbleState.width, bubbleState.height);
         overlayWindow.setResizable(true);
+        overlayWindow.setMovable(true);
         overlayWindow.setIgnoreMouseEvents(false);
 
         // Position centered if not set, otherwise use saved position
