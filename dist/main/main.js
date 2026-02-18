@@ -4350,6 +4350,7 @@ class DeepgramTranscription {
     connection = null;
     apiKey;
     language;
+    diarization;
     callbacks = null;
     keepAliveInterval = null;
     isConnected = false;
@@ -4363,10 +4364,11 @@ class DeepgramTranscription {
         lastTranscriptTime: null,
         keepAlivesSent: 0,
     };
-    constructor(apiKey, language = 'auto') {
+    constructor(apiKey, language = 'auto', diarization = false) {
         this.apiKey = apiKey;
         this.language = language;
-        console.log('[Deepgram] Service initialized with language:', language);
+        this.diarization = diarization;
+        console.log('[Deepgram] Service initialized with language:', language, 'diarization:', diarization);
         console.log('[Deepgram] API key length:', apiKey?.length || 0);
     }
     setApiKey(apiKey) {
@@ -4407,8 +4409,9 @@ class DeepgramTranscription {
             model: 'nova-3',
             language: languageCode,
             encoding: 'linear16',
-            sample_rate: 16000, // Match Deepgram example app (16kHz optimal)
+            sample_rate: 24000,
             channels: 1,
+            diarize: this.diarization,
         });
         try {
             this.connection = deepgram.listen.live({
@@ -4421,8 +4424,9 @@ class DeepgramTranscription {
                 endpointing: 300,
                 vad_events: true,
                 encoding: 'linear16',
-                sample_rate: 24000, // Testing: send 24kHz directly without resampling
+                sample_rate: 24000,
                 channels: 1,
+                diarize: this.diarization,
             });
         }
         catch (error) {
@@ -4579,8 +4583,48 @@ class DeepgramTranscription {
         const confidence = alternative.confidence || 1.0;
         const isFinal = data.is_final || false;
         const speechFinal = data.speech_final || false;
+        // Extract speaker from words array (diarization)
+        // Note: Speaker data is most reliable in final results; interim results may not have accurate diarization
+        let speaker = undefined;
+        if (this.diarization && isFinal) {
+            console.log(`[Deepgram] Diarization enabled (final result), checking words array...`);
+            console.log(`[Deepgram] alternative.words exists: ${!!alternative.words}, length: ${alternative.words?.length || 0}`);
+            if (alternative.words && alternative.words.length > 0) {
+                // Log first word to see structure
+                console.log(`[Deepgram] First word structure:`, JSON.stringify(alternative.words[0], null, 2));
+                // Find the most common speaker in this transcript segment
+                const speakerCounts = new Map();
+                for (const word of alternative.words) {
+                    if (typeof word.speaker === 'number') {
+                        speakerCounts.set(word.speaker, (speakerCounts.get(word.speaker) || 0) + 1);
+                    }
+                }
+                // Get the speaker with the most words
+                let maxCount = 0;
+                for (const [spk, count] of speakerCounts) {
+                    if (count > maxCount) {
+                        maxCount = count;
+                        speaker = spk;
+                    }
+                }
+                // Log speaker detection results
+                const uniqueSpeakers = speakerCounts.size;
+                console.log(`[Deepgram] Diarization: detected speaker ${speaker} (${uniqueSpeakers} unique speaker(s) in segment, counts: ${JSON.stringify([...speakerCounts])})`);
+                // Warn if only one speaker detected across multiple words - might indicate diarization not working well
+                if (uniqueSpeakers === 1 && alternative.words.length > 5) {
+                    console.log(`[Deepgram] Note: Only 1 speaker detected in ${alternative.words.length} words - diarization may not be distinguishing voices`);
+                }
+            }
+            else {
+                console.log(`[Deepgram] No words array available for diarization in final result`);
+            }
+        }
+        else if (this.diarization && !isFinal) {
+            // For interim results, skip diarization processing - it's not reliable
+            console.log(`[Deepgram] Skipping diarization for interim result`);
+        }
         // Log all transcripts, even empty ones for debugging
-        console.log(`[Deepgram] Transcript: "${transcript}" (final: ${isFinal}, speech_final: ${speechFinal}, confidence: ${confidence.toFixed(2)})`);
+        console.log(`[Deepgram] Transcript: "${transcript}" (final: ${isFinal}, speech_final: ${speechFinal}, confidence: ${confidence.toFixed(2)}, speaker: ${speaker ?? 'N/A'})`);
         // Skip empty transcripts
         if (!transcript.trim()) {
             console.log('[Deepgram] Skipping empty transcript');
@@ -4593,6 +4637,7 @@ class DeepgramTranscription {
             language: this.language === 'auto' ? undefined : this.language,
             isFinal,
             speechFinal,
+            speaker,
         };
         console.log('[Deepgram] Sending transcript to overlay:', result.text);
         this.callbacks?.onTranscript(result);
@@ -5038,6 +5083,7 @@ const types_1 = __webpack_require__(/*! ../shared/types */ "./src/shared/types.t
 const crypto_1 = __webpack_require__(/*! crypto */ "crypto");
 const deepgram_transcription_1 = __webpack_require__(/*! ./deepgram-transcription */ "./src/main/deepgram-transcription.ts");
 const gladia_transcription_1 = __webpack_require__(/*! ./gladia-transcription */ "./src/main/gladia-transcription.ts");
+const speechmatics_transcription_1 = __webpack_require__(/*! ./speechmatics-transcription */ "./src/main/speechmatics-transcription.ts");
 // Initialize settings store
 const store = new electron_store_1.default({
     defaults: {
@@ -5082,6 +5128,7 @@ const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DUR
 // Transcription provider pricing (per minute)
 const DEEPGRAM_COST_PER_MINUTE = 0.0043; // nova-3 Pay-as-you-go
 const GLADIA_COST_PER_MINUTE = 0.000611; // Gladia standard rate
+const SPEECHMATICS_COST_PER_MINUTE = 0.012; // Speechmatics real-time enhanced (estimate)
 // Cumulative session cost tracking
 let totalTranscriptionCost = 0;
 function convertStereoToMono(stereoBuffer) {
@@ -5513,11 +5560,15 @@ async function startTranscription() {
         // Initialize transcription service based on provider
         if (provider === 'deepgram') {
             console.log('[Main] Creating DeepgramTranscription service...');
-            transcriptionService = new deepgram_transcription_1.DeepgramTranscription(settings.deepgramApiKey, settings.language);
+            transcriptionService = new deepgram_transcription_1.DeepgramTranscription(settings.deepgramApiKey, settings.language, settings.diarization);
         }
         else if (provider === 'gladia') {
             console.log('[Main] Creating GladiaTranscription service...');
             transcriptionService = new gladia_transcription_1.GladiaTranscription(settings.gladiaApiKey, settings.language);
+        }
+        else if (provider === 'speechmatics') {
+            console.log('[Main] Creating SpeechmaticsTranscription service...');
+            transcriptionService = new speechmatics_transcription_1.SpeechmaticsTranscription(settings.speechmaticsApiKey, settings.language, settings.diarization);
         }
         if (!transcriptionService) {
             throw new Error(`Unknown provider: ${provider}`);
@@ -5579,8 +5630,16 @@ async function stopTranscription() {
     const audioSeconds = (audioStats.chunksSentToDeepgram * CHUNK_DURATION);
     const audioMinutes = audioSeconds / 60;
     // Calculate cost based on active provider
-    const costPerMinute = activeProvider === 'gladia' ? GLADIA_COST_PER_MINUTE : DEEPGRAM_COST_PER_MINUTE;
-    const providerName = activeProvider === 'gladia' ? 'Gladia' : 'Deepgram (nova-3)';
+    const costPerMinute = activeProvider === 'gladia'
+        ? GLADIA_COST_PER_MINUTE
+        : activeProvider === 'speechmatics'
+            ? SPEECHMATICS_COST_PER_MINUTE
+            : DEEPGRAM_COST_PER_MINUTE;
+    const providerName = activeProvider === 'gladia'
+        ? 'Gladia'
+        : activeProvider === 'speechmatics'
+            ? 'Speechmatics'
+            : 'Deepgram (nova-3)';
     const sessionCost = audioMinutes * costPerMinute;
     totalTranscriptionCost += sessionCost;
     console.log(`[STATS] Provider: ${activeProvider}`);
@@ -5897,6 +5956,10 @@ function formatDuration(seconds) {
 }
 // App lifecycle
 electron_1.app.whenReady().then(() => {
+    // Ensure app shows in dock on macOS
+    if (process.platform === 'darwin' && electron_1.app.dock) {
+        electron_1.app.dock.show();
+    }
     setupWindowsLoopbackHandler();
     createControlWindow();
     createOverlayWindow();
@@ -5928,6 +5991,400 @@ electron_1.app.on('before-quit', async () => {
 
 /***/ },
 
+/***/ "./src/main/speechmatics-transcription.ts"
+/*!************************************************!*\
+  !*** ./src/main/speechmatics-transcription.ts ***!
+  \************************************************/
+(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * Speechmatics Live Streaming Transcription Service
+ *
+ * Handles real-time audio transcription using Speechmatics' WebSocket API.
+ * Known for high-quality diarization capabilities.
+ */
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SpeechmaticsTranscription = void 0;
+const ws_1 = __importDefault(__webpack_require__(/*! ws */ "./node_modules/ws/index.js"));
+// Speechmatics WebSocket endpoint
+const SPEECHMATICS_WS_URL = 'wss://eu2.rt.speechmatics.com/v2';
+class SpeechmaticsTranscription {
+    ws = null;
+    apiKey;
+    language;
+    diarization;
+    callbacks = null;
+    isConnected = false;
+    isRecognitionStarted = false;
+    sessionId = null;
+    // Diagnostic tracking
+    diagnostics = {
+        connectionState: 'disconnected',
+        lastError: null,
+        audioChunksSent: 0,
+        audioBytesSent: 0,
+        transcriptsReceived: 0,
+        lastTranscriptTime: null,
+        sessionId: null,
+    };
+    constructor(apiKey, language = 'auto', diarization = false) {
+        this.apiKey = apiKey;
+        this.language = language;
+        this.diarization = diarization;
+        console.log('[Speechmatics] Service initialized with language:', language, 'diarization:', diarization);
+        console.log('[Speechmatics] API key length:', apiKey?.length || 0);
+    }
+    setApiKey(apiKey) {
+        this.apiKey = apiKey;
+    }
+    setLanguage(language) {
+        this.language = language;
+    }
+    /**
+     * Get current diagnostic information
+     */
+    getDiagnostics() {
+        return { ...this.diagnostics };
+    }
+    /**
+     * Start the WebSocket connection to Speechmatics
+     */
+    async start(callbacks) {
+        if (!this.apiKey) {
+            const error = 'Speechmatics API key not set';
+            console.error('[Speechmatics]', error);
+            this.diagnostics.lastError = error;
+            this.diagnostics.connectionState = 'error';
+            throw new Error(error);
+        }
+        if (this.ws) {
+            console.log('[Speechmatics] Connection already exists, closing first');
+            await this.stop();
+        }
+        this.callbacks = callbacks;
+        this.diagnostics.connectionState = 'connecting';
+        this.resetDiagnostics();
+        const languageCode = this.mapLanguage(this.language);
+        console.log('[Speechmatics] Connecting to WebSocket with config:', {
+            language: languageCode,
+            diarization: this.diarization ? 'speaker' : 'none',
+            sample_rate: 16000,
+            encoding: 'pcm_s16le',
+        });
+        return new Promise((resolve, reject) => {
+            // Connect with Authorization header
+            this.ws = new ws_1.default(SPEECHMATICS_WS_URL, {
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                },
+            });
+            this.ws.on('open', () => {
+                console.log('[Speechmatics] ✓ WebSocket CONNECTED');
+                this.isConnected = true;
+                this.diagnostics.connectionState = 'connected';
+                // Send StartRecognition message
+                this.sendStartRecognition(languageCode);
+            });
+            this.ws.on('message', (data) => {
+                try {
+                    const message = JSON.parse(data.toString());
+                    this.handleMessage(message, resolve, reject);
+                }
+                catch (error) {
+                    console.error('[Speechmatics] Failed to parse message:', error);
+                }
+            });
+            this.ws.on('error', (error) => {
+                console.error('[Speechmatics] ✗ WebSocket ERROR:', error.message);
+                this.diagnostics.lastError = error.message;
+                this.diagnostics.connectionState = 'error';
+                this.callbacks?.onError(error);
+                if (!this.isRecognitionStarted) {
+                    reject(error);
+                }
+            });
+            this.ws.on('close', (code, reason) => {
+                console.log('[Speechmatics] WebSocket CLOSED, code:', code, 'reason:', reason.toString());
+                this.isConnected = false;
+                this.isRecognitionStarted = false;
+                this.diagnostics.connectionState = 'disconnected';
+                this.callbacks?.onClose();
+            });
+            // Timeout for connection
+            const timeout = setTimeout(() => {
+                if (!this.isRecognitionStarted) {
+                    const error = 'Connection timeout after 15 seconds';
+                    console.error('[Speechmatics]', error);
+                    this.diagnostics.lastError = error;
+                    this.diagnostics.connectionState = 'error';
+                    reject(new Error(error));
+                    this.stop();
+                }
+            }, 15000);
+            // Store timeout to clear it later
+            this._connectionTimeout = timeout;
+        });
+    }
+    sendStartRecognition(languageCode) {
+        if (!this.ws)
+            return;
+        const startMessage = {
+            message: 'StartRecognition',
+            transcription_config: {
+                language: languageCode,
+                operating_point: 'enhanced',
+                enable_partials: true,
+                max_delay: 2,
+            },
+            audio_format: {
+                type: 'raw',
+                encoding: 'pcm_s16le',
+                sample_rate: 16000,
+            },
+        };
+        // Add diarization config if enabled
+        if (this.diarization) {
+            startMessage.transcription_config.diarization = 'speaker';
+            startMessage.transcription_config.speaker_diarization_config = {
+                max_speakers: 10,
+            };
+        }
+        console.log('[Speechmatics] Sending StartRecognition:', JSON.stringify(startMessage, null, 2));
+        this.ws.send(JSON.stringify(startMessage));
+    }
+    /**
+     * Send audio data to Speechmatics
+     * @param audioBuffer - Raw PCM audio data (16-bit, 24kHz, mono)
+     */
+    send(audioBuffer) {
+        if (!this.ws) {
+            console.warn('[Speechmatics] Cannot send audio: no WebSocket connection');
+            return;
+        }
+        if (!this.isConnected || !this.isRecognitionStarted) {
+            console.warn('[Speechmatics] Cannot send audio: not ready (connected:', this.isConnected, ', recognition started:', this.isRecognitionStarted, ')');
+            return;
+        }
+        try {
+            // Resample from 24kHz to 16kHz
+            const resampledBuffer = this.resample24kTo16k(audioBuffer);
+            // Send as binary data (AddAudio is implicit for binary messages)
+            this.ws.send(resampledBuffer);
+            this.diagnostics.audioChunksSent++;
+            this.diagnostics.audioBytesSent += resampledBuffer.byteLength;
+            // Log every 50 chunks
+            if (this.diagnostics.audioChunksSent % 50 === 0) {
+                console.log(`[Speechmatics] Audio stats: ${this.diagnostics.audioChunksSent} chunks, ${(this.diagnostics.audioBytesSent / 1024).toFixed(1)} KB sent`);
+            }
+        }
+        catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error('[Speechmatics] Error sending audio:', errorMsg);
+            this.diagnostics.lastError = errorMsg;
+        }
+    }
+    /**
+     * Stop the WebSocket connection
+     */
+    async stop() {
+        console.log('[Speechmatics] Stopping connection...');
+        if (this.ws) {
+            try {
+                // Send EndOfStream message
+                if (this.isConnected && this.isRecognitionStarted) {
+                    this.ws.send(JSON.stringify({ message: 'EndOfStream', last_seq_no: this.diagnostics.audioChunksSent }));
+                    console.log('[Speechmatics] EndOfStream sent');
+                }
+                // Close with normal closure code
+                this.ws.close(1000, 'Session ended');
+                console.log('[Speechmatics] WebSocket close requested');
+            }
+            catch (error) {
+                console.error('[Speechmatics] Error closing connection:', error);
+            }
+            this.ws = null;
+        }
+        this.isConnected = false;
+        this.isRecognitionStarted = false;
+        this.diagnostics.connectionState = 'disconnected';
+        this.callbacks = null;
+        console.log('[Speechmatics] Final stats:', {
+            sessionId: this.sessionId,
+            audioChunksSent: this.diagnostics.audioChunksSent,
+            audioBytesSent: this.diagnostics.audioBytesSent,
+            transcriptsReceived: this.diagnostics.transcriptsReceived,
+        });
+    }
+    /**
+     * Check if connected to Speechmatics
+     */
+    get connected() {
+        return this.isConnected && this.isRecognitionStarted;
+    }
+    handleMessage(message, resolveStart, rejectStart) {
+        const messageType = message.message;
+        switch (messageType) {
+            case 'RecognitionStarted':
+                console.log('[Speechmatics] Recognition started, session ID:', message.id);
+                this.sessionId = message.id;
+                this.diagnostics.sessionId = message.id;
+                this.isRecognitionStarted = true;
+                // Clear connection timeout
+                if (this._connectionTimeout) {
+                    clearTimeout(this._connectionTimeout);
+                }
+                this.callbacks?.onOpen();
+                if (resolveStart)
+                    resolveStart();
+                break;
+            case 'AddPartialTranscript':
+                this.handleTranscript(message, false);
+                break;
+            case 'AddTranscript':
+                this.handleTranscript(message, true);
+                break;
+            case 'EndOfTranscript':
+                console.log('[Speechmatics] End of transcript received');
+                break;
+            case 'AudioAdded':
+                // Acknowledgment of audio receipt - can ignore
+                break;
+            case 'Info':
+                console.log('[Speechmatics] Info:', message.reason, message.message);
+                break;
+            case 'Warning':
+                console.warn('[Speechmatics] Warning:', message.reason, message.message);
+                break;
+            case 'Error':
+                const errorMsg = message.reason || message.message || 'Unknown error';
+                console.error('[Speechmatics] Error:', errorMsg);
+                this.diagnostics.lastError = errorMsg;
+                this.callbacks?.onError(new Error(errorMsg));
+                if (rejectStart && !this.isRecognitionStarted) {
+                    rejectStart(new Error(errorMsg));
+                }
+                break;
+            default:
+                console.log('[Speechmatics] Unknown message type:', messageType, message);
+        }
+    }
+    handleTranscript(message, isFinal) {
+        this.diagnostics.transcriptsReceived++;
+        this.diagnostics.lastTranscriptTime = Date.now();
+        const metadata = message.metadata;
+        const results = message.results || [];
+        // Build transcript text from results
+        let text = '';
+        let speaker = undefined;
+        // Track speaker occurrences for this segment
+        const speakerCounts = new Map();
+        for (const result of results) {
+            if (result.alternatives && result.alternatives.length > 0) {
+                const alt = result.alternatives[0];
+                text += alt.content;
+                // Track speaker from each word/result
+                if (alt.speaker && this.diarization) {
+                    speakerCounts.set(alt.speaker, (speakerCounts.get(alt.speaker) || 0) + 1);
+                }
+            }
+            // Add space between words (Speechmatics doesn't include spaces in content)
+            if (result.type === 'word') {
+                text += ' ';
+            }
+        }
+        // Determine dominant speaker
+        if (speakerCounts.size > 0) {
+            let maxCount = 0;
+            let dominantSpeaker = '';
+            for (const [spk, count] of speakerCounts) {
+                if (count > maxCount) {
+                    maxCount = count;
+                    dominantSpeaker = spk;
+                }
+            }
+            // Convert speaker label (S1, S2, etc.) to number
+            if (dominantSpeaker.startsWith('S')) {
+                speaker = parseInt(dominantSpeaker.substring(1), 10) - 1; // S1 -> 0, S2 -> 1, etc.
+            }
+            console.log(`[Speechmatics] Diarization: detected speaker ${dominantSpeaker} (${speakerCounts.size} unique speaker(s), counts: ${JSON.stringify([...speakerCounts])})`);
+        }
+        text = text.trim();
+        console.log(`[Speechmatics] Transcript: "${text}" (final: ${isFinal}, speaker: ${speaker ?? 'N/A'})`);
+        // Skip empty transcripts
+        if (!text) {
+            console.log('[Speechmatics] Skipping empty transcript');
+            return;
+        }
+        const result = {
+            text,
+            timestamp: Date.now(),
+            confidence: 1.0, // Speechmatics provides per-word confidence but we simplify here
+            language: this.language === 'auto' ? undefined : this.language,
+            isFinal,
+            speechFinal: isFinal,
+            speaker,
+        };
+        console.log('[Speechmatics] Sending transcript to overlay:', result.text);
+        this.callbacks?.onTranscript(result);
+    }
+    mapLanguage(language) {
+        // Speechmatics uses standard language codes
+        const languageMap = {
+            ja: 'ja',
+            ko: 'ko',
+            zh: 'cmn', // Speechmatics uses 'cmn' for Mandarin Chinese
+            es: 'es',
+            fr: 'fr',
+            de: 'de',
+            en: 'en',
+            auto: 'en', // Default to English for auto
+        };
+        return languageMap[language] || 'en';
+    }
+    /**
+     * Resample 24kHz audio to 16kHz using linear interpolation
+     * Input: 16-bit PCM mono at 24kHz
+     * Output: 16-bit PCM mono at 16kHz
+     */
+    resample24kTo16k(input) {
+        const inputSamples = input.length / 2;
+        const outputSamples = Math.floor(inputSamples * 16000 / 24000);
+        const output = Buffer.alloc(outputSamples * 2);
+        const ratio = 24000 / 16000; // 1.5
+        for (let i = 0; i < outputSamples; i++) {
+            const srcIndex = i * ratio;
+            const srcIndexFloor = Math.floor(srcIndex);
+            const srcIndexCeil = Math.min(srcIndexFloor + 1, inputSamples - 1);
+            const fraction = srcIndex - srcIndexFloor;
+            const sample1 = input.readInt16LE(srcIndexFloor * 2);
+            const sample2 = input.readInt16LE(srcIndexCeil * 2);
+            const interpolated = Math.round(sample1 + (sample2 - sample1) * fraction);
+            output.writeInt16LE(interpolated, i * 2);
+        }
+        return output;
+    }
+    resetDiagnostics() {
+        this.diagnostics = {
+            connectionState: 'connecting',
+            lastError: null,
+            audioChunksSent: 0,
+            audioBytesSent: 0,
+            transcriptsReceived: 0,
+            lastTranscriptTime: null,
+            sessionId: this.sessionId,
+        };
+    }
+}
+exports.SpeechmaticsTranscription = SpeechmaticsTranscription;
+
+
+/***/ },
+
 /***/ "./src/shared/types.ts"
 /*!*****************************!*\
   !*** ./src/shared/types.ts ***!
@@ -5938,10 +6395,19 @@ electron_1.app.on('before-quit', async () => {
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.OVERLAY_MODE_NAMES = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.OVERLAY_MODE_NAMES = void 0;
 exports.OVERLAY_MODE_NAMES = {
     bubble: 'Floating Bubble',
     subtitle: 'Classic Subtitles',
+};
+// Speaker colors for diarization display
+exports.SPEAKER_COLORS = {
+    0: '#60A5FA', // Blue
+    1: '#34D399', // Green
+    2: '#F472B6', // Pink
+    3: '#FBBF24', // Yellow
+    4: '#A78BFA', // Purple
+    5: '#FB923C', // Orange
 };
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
@@ -5967,10 +6433,12 @@ exports.DEFAULT_SETTINGS = {
     transcriptionProvider: 'deepgram',
     deepgramApiKey: '',
     gladiaApiKey: '',
+    speechmaticsApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
     chunkSize: 2,
+    diarization: false,
     overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,
@@ -5992,6 +6460,7 @@ exports.LANGUAGE_NAMES = {
 exports.PROVIDER_NAMES = {
     deepgram: 'Deepgram',
     gladia: 'Gladia',
+    speechmatics: 'Speechmatics',
 };
 exports.MODEL_INFO = {
     tiny: { size: '~75MB', speed: 'Fastest', accuracy: 'Good' },

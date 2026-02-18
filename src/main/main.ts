@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto';
 import { TranscriptionService, TranscriptionDiagnostics } from './transcription-service';
 import { DeepgramTranscription, DiagnosticInfo } from './deepgram-transcription';
 import { GladiaTranscription } from './gladia-transcription';
+import { SpeechmaticsTranscription } from './speechmatics-transcription';
 
 // Initialize settings store
 const store = new Store<{ settings: AppSettings; transcripts: SavedTranscript[] }>({
@@ -45,7 +46,7 @@ let tray: Tray | null = null;
 // State
 let transcriptionState: TranscriptionState = 'idle';
 let transcriptionService: TranscriptionService | null = null;
-let activeProvider: 'deepgram' | 'gladia' | null = null;
+let activeProvider: 'deepgram' | 'gladia' | 'speechmatics' | null = null;
 
 // Current session tracking
 let currentSessionStartTime: number | null = null;
@@ -82,6 +83,7 @@ const CHUNK_SIZE = CAPTURE_SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * CHUNK_DUR
 // Transcription provider pricing (per minute)
 const DEEPGRAM_COST_PER_MINUTE = 0.0043;  // nova-3 Pay-as-you-go
 const GLADIA_COST_PER_MINUTE = 0.000611;   // Gladia standard rate
+const SPEECHMATICS_COST_PER_MINUTE = 0.012;  // Speechmatics real-time enhanced (estimate)
 
 // Cumulative session cost tracking
 let totalTranscriptionCost = 0;
@@ -579,10 +581,13 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
     // Initialize transcription service based on provider
     if (provider === 'deepgram') {
       console.log('[Main] Creating DeepgramTranscription service...');
-      transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language);
+      transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language, settings.diarization);
     } else if (provider === 'gladia') {
       console.log('[Main] Creating GladiaTranscription service...');
       transcriptionService = new GladiaTranscription(settings.gladiaApiKey, settings.language);
+    } else if (provider === 'speechmatics') {
+      console.log('[Main] Creating SpeechmaticsTranscription service...');
+      transcriptionService = new SpeechmaticsTranscription(settings.speechmaticsApiKey, settings.language, settings.diarization);
     }
 
     if (!transcriptionService) {
@@ -652,8 +657,16 @@ async function stopTranscription(): Promise<{ success: boolean }> {
   const audioMinutes = audioSeconds / 60;
 
   // Calculate cost based on active provider
-  const costPerMinute = activeProvider === 'gladia' ? GLADIA_COST_PER_MINUTE : DEEPGRAM_COST_PER_MINUTE;
-  const providerName = activeProvider === 'gladia' ? 'Gladia' : 'Deepgram (nova-3)';
+  const costPerMinute = activeProvider === 'gladia'
+    ? GLADIA_COST_PER_MINUTE
+    : activeProvider === 'speechmatics'
+      ? SPEECHMATICS_COST_PER_MINUTE
+      : DEEPGRAM_COST_PER_MINUTE;
+  const providerName = activeProvider === 'gladia'
+    ? 'Gladia'
+    : activeProvider === 'speechmatics'
+      ? 'Speechmatics'
+      : 'Deepgram (nova-3)';
   const sessionCost = audioMinutes * costPerMinute;
   totalTranscriptionCost += sessionCost;
 
@@ -1011,6 +1024,11 @@ function formatDuration(seconds: number): string {
 
 // App lifecycle
 app.whenReady().then(() => {
+  // Ensure app shows in dock on macOS
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show();
+  }
+
   setupWindowsLoopbackHandler();
   createControlWindow();
   createOverlayWindow();

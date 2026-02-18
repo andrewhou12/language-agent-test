@@ -36439,6 +36439,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ClassicSubtitle = ClassicSubtitle;
 const jsx_runtime_1 = __webpack_require__(/*! react/jsx-runtime */ "./node_modules/react/jsx-runtime.js");
 const react_1 = __webpack_require__(/*! react */ "./node_modules/react/index.js");
+const types_1 = __webpack_require__(/*! ../../shared/types */ "./src/shared/types.ts");
 function ClassicSubtitle({ style, registerHandlers }) {
     const [subtitles, setSubtitles] = (0, react_1.useState)([]);
     const [isListening, setIsListening] = (0, react_1.useState)(true);
@@ -36476,6 +36477,7 @@ function ClassicSubtitle({ style, registerHandlers }) {
                         ...updated[lastInterimIndex],
                         text: result.text,
                         isFinal: true,
+                        speaker: result.speaker,
                     };
                     // Schedule fade-out for the now-final entry
                     scheduleRemoval(updated[lastInterimIndex].id, style.displayDuration);
@@ -36490,6 +36492,7 @@ function ClassicSubtitle({ style, registerHandlers }) {
                         timestamp: result.timestamp,
                         isFadingOut: false,
                         isFinal: true,
+                        speaker: result.speaker,
                     };
                     scheduleRemoval(id, style.displayDuration);
                     const maxToKeep = style.maxLines;
@@ -36505,6 +36508,7 @@ function ClassicSubtitle({ style, registerHandlers }) {
                     updated[lastInterimIndex] = {
                         ...updated[lastInterimIndex],
                         text: result.text,
+                        speaker: result.speaker,
                     };
                     return updated;
                 }
@@ -36517,6 +36521,7 @@ function ClassicSubtitle({ style, registerHandlers }) {
                         timestamp: result.timestamp,
                         isFadingOut: false,
                         isFinal: false,
+                        speaker: result.speaker,
                     };
                     const maxToKeep = style.maxLines;
                     const kept = prev.slice(-(maxToKeep - 1));
@@ -36571,7 +36576,20 @@ function ClassicSubtitle({ style, registerHandlers }) {
         }
         return '';
     };
-    return ((0, jsx_runtime_1.jsx)("div", { className: `subtitle-overlay ${positionClass}`, style: containerStyle, children: (0, jsx_runtime_1.jsxs)("div", { className: "subtitle-container", children: [subtitles.length === 0 && isListening && ((0, jsx_runtime_1.jsxs)("div", { className: "status-indicator", children: [(0, jsx_runtime_1.jsx)("span", { className: "status-dot" }), (0, jsx_runtime_1.jsx)("span", { children: "Listening..." })] })), subtitles.map((subtitle) => ((0, jsx_runtime_1.jsx)("div", { className: `subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${style.textShadow ? 'text-shadow' : ''} ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`, style: lineStyle, children: subtitle.text }, subtitle.id)))] }) }));
+    // Get speaker color
+    const getSpeakerColor = (speaker) => {
+        if (speaker === undefined)
+            return undefined;
+        return types_1.SPEAKER_COLORS[speaker % Object.keys(types_1.SPEAKER_COLORS).length];
+    };
+    return ((0, jsx_runtime_1.jsx)("div", { className: `subtitle-overlay ${positionClass}`, style: containerStyle, children: (0, jsx_runtime_1.jsxs)("div", { className: "subtitle-container", children: [subtitles.length === 0 && isListening && ((0, jsx_runtime_1.jsxs)("div", { className: "status-indicator", children: [(0, jsx_runtime_1.jsx)("span", { className: "status-dot" }), (0, jsx_runtime_1.jsx)("span", { children: "Listening..." })] })), subtitles.map((subtitle) => {
+                    // Only apply speaker color for final results (diarization is more accurate)
+                    const speakerColor = subtitle.isFinal ? getSpeakerColor(subtitle.speaker) : undefined;
+                    return ((0, jsx_runtime_1.jsx)("div", { className: `subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${style.textShadow ? 'text-shadow' : ''} ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`, style: {
+                            ...lineStyle,
+                            color: speakerColor || style.textColor,
+                        }, children: subtitle.text }, subtitle.id));
+                })] }) }));
 }
 // Helper function to convert hex color to RGB
 function hexToRgb(hex) {
@@ -36657,6 +36675,7 @@ function SubtitleOverlay({ style, registerHandlers }) {
                         ...updated[lastInterimIndex],
                         text: result.text,
                         isFinal: true,
+                        speaker: result.speaker,
                     };
                 }
                 else {
@@ -36669,6 +36688,7 @@ function SubtitleOverlay({ style, registerHandlers }) {
                             text: result.text,
                             timestamp: result.timestamp,
                             isFinal: true,
+                            speaker: result.speaker,
                         },
                     ];
                 }
@@ -36681,6 +36701,7 @@ function SubtitleOverlay({ style, registerHandlers }) {
                         ...updated[lastInterimIndex],
                         text: result.text,
                         timestamp: Date.now(),
+                        speaker: result.speaker,
                     };
                 }
                 else {
@@ -36692,6 +36713,7 @@ function SubtitleOverlay({ style, registerHandlers }) {
                             text: result.text,
                             timestamp: result.timestamp,
                             isFinal: false,
+                            speaker: result.speaker,
                         },
                     ];
                 }
@@ -36723,9 +36745,19 @@ function SubtitleOverlay({ style, registerHandlers }) {
             return 'lang-cjk';
         return '';
     };
-    // Build transcript text with proper spacing
+    // Get speaker color
+    const getSpeakerColor = (speaker) => {
+        if (speaker === undefined)
+            return undefined;
+        return types_1.SPEAKER_COLORS[speaker % Object.keys(types_1.SPEAKER_COLORS).length];
+    };
+    // Build transcript text with proper spacing and speaker colors
     const renderTranscriptText = () => {
-        return transcripts.map((t, index) => ((0, jsx_runtime_1.jsxs)("span", { className: `transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(t.text)}`, children: [t.text, index < transcripts.length - 1 ? ' ' : ''] }, t.id)));
+        return transcripts.map((t, index) => {
+            // Only apply speaker color for final results (diarization is more accurate)
+            const speakerColor = t.isFinal ? getSpeakerColor(t.speaker) : undefined;
+            return ((0, jsx_runtime_1.jsxs)("span", { className: `transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(t.text)}`, style: speakerColor ? { color: speakerColor } : undefined, children: [t.text, index < transcripts.length - 1 ? ' ' : ''] }, t.id));
+        });
     };
     return ((0, jsx_runtime_1.jsxs)("div", { className: `bubble-container ${isCollapsed ? 'collapsed' : ''}`, children: [(0, jsx_runtime_1.jsxs)("div", { className: "bubble-header", children: [(0, jsx_runtime_1.jsxs)("div", { className: "header-left", children: [(0, jsx_runtime_1.jsx)("div", { className: "status-dot" }), isCollapsed && (0, jsx_runtime_1.jsx)("span", { className: "collapsed-label", children: "Live" })] }), (0, jsx_runtime_1.jsx)("button", { className: "collapse-btn", onClick: handleToggleCollapse, title: isCollapsed ? 'Expand' : 'Collapse', children: isCollapsed ? '▼' : '▲' })] }), !isCollapsed && ((0, jsx_runtime_1.jsx)("div", { className: "bubble-content", ref: scrollRef, style: {
                     fontFamily: style.fontFamily,
@@ -36860,10 +36892,19 @@ if (container) {
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.OVERLAY_MODE_NAMES = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.OVERLAY_MODE_NAMES = void 0;
 exports.OVERLAY_MODE_NAMES = {
     bubble: 'Floating Bubble',
     subtitle: 'Classic Subtitles',
+};
+// Speaker colors for diarization display
+exports.SPEAKER_COLORS = {
+    0: '#60A5FA', // Blue
+    1: '#34D399', // Green
+    2: '#F472B6', // Pink
+    3: '#FBBF24', // Yellow
+    4: '#A78BFA', // Purple
+    5: '#FB923C', // Orange
 };
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
@@ -36889,10 +36930,12 @@ exports.DEFAULT_SETTINGS = {
     transcriptionProvider: 'deepgram',
     deepgramApiKey: '',
     gladiaApiKey: '',
+    speechmaticsApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
     chunkSize: 2,
+    diarization: false,
     overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,
@@ -36914,6 +36957,7 @@ exports.LANGUAGE_NAMES = {
 exports.PROVIDER_NAMES = {
     deepgram: 'Deepgram',
     gladia: 'Gladia',
+    speechmatics: 'Speechmatics',
 };
 exports.MODEL_INFO = {
     tiny: { size: '~75MB', speed: 'Fastest', accuracy: 'Good' },

@@ -4,6 +4,7 @@ import {
   OverlayStyle,
   BubbleState,
   DEFAULT_BUBBLE_STATE,
+  SPEAKER_COLORS,
 } from '../../shared/types';
 import type { OverlayAPI } from '../../main/preload-overlay';
 
@@ -15,6 +16,7 @@ interface TranscriptEntry {
   text: string;
   timestamp: number;
   isFinal: boolean;
+  speaker?: number;
 }
 
 // Configuration
@@ -93,6 +95,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
               ...updated[lastInterimIndex],
               text: result.text,
               isFinal: true,
+              speaker: result.speaker,
             };
           } else {
             // No interim to replace, add as new final entry
@@ -104,6 +107,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
                 text: result.text,
                 timestamp: result.timestamp,
                 isFinal: true,
+                speaker: result.speaker,
               },
             ];
           }
@@ -115,6 +119,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
               ...updated[lastInterimIndex],
               text: result.text,
               timestamp: Date.now(),
+              speaker: result.speaker,
             };
           } else {
             const id = nextIdRef.current++;
@@ -125,6 +130,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
                 text: result.text,
                 timestamp: result.timestamp,
                 isFinal: false,
+                speaker: result.speaker,
               },
             ];
           }
@@ -161,17 +167,28 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
     return '';
   };
 
-  // Build transcript text with proper spacing
+  // Get speaker color
+  const getSpeakerColor = (speaker?: number): string | undefined => {
+    if (speaker === undefined) return undefined;
+    return SPEAKER_COLORS[speaker % Object.keys(SPEAKER_COLORS).length];
+  };
+
+  // Build transcript text with proper spacing and speaker colors
   const renderTranscriptText = () => {
-    return transcripts.map((t, index) => (
-      <span
-        key={t.id}
-        className={`transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(t.text)}`}
-      >
-        {t.text}
-        {index < transcripts.length - 1 ? ' ' : ''}
-      </span>
-    ));
+    return transcripts.map((t, index) => {
+      // Only apply speaker color for final results (diarization is more accurate)
+      const speakerColor = t.isFinal ? getSpeakerColor(t.speaker) : undefined;
+      return (
+        <span
+          key={t.id}
+          className={`transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(t.text)}`}
+          style={speakerColor ? { color: speakerColor } : undefined}
+        >
+          {t.text}
+          {index < transcripts.length - 1 ? ' ' : ''}
+        </span>
+      );
+    });
   };
 
   return (

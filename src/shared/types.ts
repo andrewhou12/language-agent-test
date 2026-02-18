@@ -14,7 +14,7 @@ export type SupportedLanguage =
   | 'en' // English
   | 'auto'; // Auto-detect
 
-export type TranscriptionProvider = 'deepgram' | 'gladia';
+export type TranscriptionProvider = 'deepgram' | 'gladia' | 'speechmatics';
 
 export type OverlayMode = 'bubble' | 'subtitle';
 
@@ -30,7 +30,18 @@ export interface TranscriptionResult {
   language?: string;
   isFinal?: boolean;      // Whether this is the final transcription for this segment
   speechFinal?: boolean;  // Whether the speaker has finished this utterance
+  speaker?: number;       // Speaker ID from diarization (0, 1, 2, etc.)
 }
+
+// Speaker colors for diarization display
+export const SPEAKER_COLORS: Record<number, string> = {
+  0: '#60A5FA', // Blue
+  1: '#34D399', // Green
+  2: '#F472B6', // Pink
+  3: '#FBBF24', // Yellow
+  4: '#A78BFA', // Purple
+  5: '#FB923C', // Orange
+};
 
 export interface SavedTranscript {
   id: string;
@@ -81,6 +92,7 @@ export interface AppSettings {
   // API settings
   deepgramApiKey: string;
   gladiaApiKey: string;
+  speechmaticsApiKey: string;
 
   // Model settings
   whisperModel: WhisperModel;
@@ -89,6 +101,9 @@ export interface AppSettings {
   // Performance settings
   gpuAcceleration: boolean;
   chunkSize: number; // in seconds (1-3)
+
+  // Transcription features
+  diarization: boolean; // Enable speaker diarization
 
   // Overlay settings
   overlayMode: OverlayMode;
@@ -130,10 +145,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   transcriptionProvider: 'deepgram',
   deepgramApiKey: '',
   gladiaApiKey: '',
+  speechmaticsApiKey: '',
   whisperModel: 'base',
   language: 'auto',
   gpuAcceleration: true,
   chunkSize: 2,
+  diarization: false,
   overlayMode: 'bubble',
   overlayStyle: DEFAULT_OVERLAY_STYLE,
   bubbleState: DEFAULT_BUBBLE_STATE,
@@ -157,6 +174,7 @@ export const LANGUAGE_NAMES: Record<SupportedLanguage, string> = {
 export const PROVIDER_NAMES: Record<TranscriptionProvider, string> = {
   deepgram: 'Deepgram',
   gladia: 'Gladia',
+  speechmatics: 'Speechmatics',
 };
 
 export const MODEL_INFO: Record<WhisperModel, { size: string; speed: string; accuracy: string }> = {
