@@ -164,6 +164,13 @@ body.mode-subtitle {
   color: rgba(255, 255, 255, 0.95);
 }
 
+/* Translation text in bubble mode */
+.translation-text {
+  color: rgba(180, 220, 255, 0.85);
+  font-style: italic;
+  font-size: 0.9em;
+}
+
 /* CJK language support */
 .transcript-word.lang-cjk {
   font-family:
@@ -274,6 +281,16 @@ body.mode-subtitle {
 
 .subtitle-line.fading-out {
   animation: fadeOut 0.5s ease-out forwards;
+}
+
+/* Translation text in classic subtitle mode */
+.subtitle-translation {
+  color: rgba(180, 220, 255, 0.9);
+  font-style: italic;
+  font-size: 0.85em;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 /* CJK Language Support */

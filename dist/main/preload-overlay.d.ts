@@ -4,12 +4,13 @@
  * Exposes a minimal API for receiving transcription updates
  * and style changes from the main process.
  */
-import { TranscriptionResult, OverlayStyle, BubbleState, OverlayMode } from '../shared/types';
+import { TranscriptionResult, OverlayStyle, BubbleState, OverlayMode, AppSettings } from '../shared/types';
 export interface OverlayAPI {
     onTranscriptionUpdate: (callback: (result: TranscriptionResult) => void) => void;
     onClearTranscription: (callback: () => void) => void;
     onStyleUpdate: (callback: (style: OverlayStyle) => void) => void;
     onOverlayModeChange: (callback: (mode: OverlayMode) => void) => void;
+    getSettings: () => Promise<AppSettings>;
     getOverlayMode: () => Promise<OverlayMode>;
     getBubbleState: () => Promise<BubbleState>;
     saveBubbleState: (state: BubbleState) => Promise<BubbleState>;

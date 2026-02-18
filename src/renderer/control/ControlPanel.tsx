@@ -5,9 +5,11 @@ import {
   SupportedLanguage,
   TranscriptionProvider,
   OverlayMode,
+  TranslationDisplayMode,
   LANGUAGE_NAMES,
   PROVIDER_NAMES,
   OVERLAY_MODE_NAMES,
+  TRANSLATION_DISPLAY_MODE_NAMES,
 } from '../../shared/types';
 import type { ControlAPI } from '../../main/preload-control';
 import { useSystemAudio } from './useSystemAudio';
@@ -213,6 +215,30 @@ export function ControlPanel(): React.ReactElement {
     setSettings(updated);
   }, [settings]);
 
+  const handleTranslationToggle = useCallback(async () => {
+    if (!settings) return;
+    const updated = await window.electronAPI.updateSettings({ translationEnabled: !settings.translationEnabled });
+    setSettings(updated);
+  }, [settings]);
+
+  const handleTranslationTargetChange = useCallback(
+    async (language: SupportedLanguage) => {
+      if (!settings) return;
+      const updated = await window.electronAPI.updateSettings({ translationTargetLanguage: language });
+      setSettings(updated);
+    },
+    [settings]
+  );
+
+  const handleTranslationDisplayModeChange = useCallback(
+    async (mode: TranslationDisplayMode) => {
+      if (!settings) return;
+      const updated = await window.electronAPI.updateSettings({ translationDisplayMode: mode });
+      setSettings(updated);
+    },
+    [settings]
+  );
+
   const toggleSection = (section: string) => {
     setExpandedSection(expandedSection === section ? null : section);
   };
@@ -394,6 +420,67 @@ export function ControlPanel(): React.ReactElement {
                     </button>
                   </div>
                 </div>
+              )}
+
+              {provider === 'gladia' && (
+                <>
+                  <div className="field-group">
+                    <div className="toggle-row">
+                      <div className="toggle-label">
+                        <TranslateIcon />
+                        <div>
+                          <span>Live Translation</span>
+                          <span className="toggle-description">Translate speech in real-time</span>
+                        </div>
+                      </div>
+                      <button
+                        className={`toggle-switch ${settings.translationEnabled ? 'active' : ''}`}
+                        onClick={handleTranslationToggle}
+                        disabled={isActive}
+                      >
+                        <span className="toggle-slider" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {settings.translationEnabled && (
+                    <>
+                      <div className="field-group">
+                        <label>Translate To</label>
+                        <div className="translation-target-grid">
+                          {Object.entries(LANGUAGE_NAMES)
+                            .filter(([code]) => code !== 'auto')
+                            .map(([code, name]) => (
+                              <button
+                                key={code}
+                                className={`translation-target-option ${settings.translationTargetLanguage === code ? 'selected' : ''}`}
+                                onClick={() => handleTranslationTargetChange(code as SupportedLanguage)}
+                                disabled={isActive}
+                              >
+                                {name}
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+
+                      <div className="field-group">
+                        <label>Display Mode</label>
+                        <div className="translation-display-grid">
+                          {Object.entries(TRANSLATION_DISPLAY_MODE_NAMES).map(([code, name]) => (
+                            <button
+                              key={code}
+                              className={`translation-display-option ${settings.translationDisplayMode === code ? 'selected' : ''}`}
+                              onClick={() => handleTranslationDisplayModeChange(code as TranslationDisplayMode)}
+                              disabled={isActive}
+                            >
+                              {name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -723,6 +810,14 @@ function SpeakersIcon(): React.ReactElement {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function TranslateIcon(): React.ReactElement {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6" />
     </svg>
   );
 }

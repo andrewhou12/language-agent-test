@@ -584,7 +584,13 @@ async function startTranscription(): Promise<{ success: boolean; error?: string 
       transcriptionService = new DeepgramTranscription(settings.deepgramApiKey, settings.language, settings.diarization);
     } else if (provider === 'gladia') {
       console.log('[Main] Creating GladiaTranscription service...');
-      transcriptionService = new GladiaTranscription(settings.gladiaApiKey, settings.language);
+      console.log('[Main] Translation enabled:', settings.translationEnabled, 'target:', settings.translationTargetLanguage);
+      transcriptionService = new GladiaTranscription(
+        settings.gladiaApiKey,
+        settings.language,
+        settings.translationEnabled,
+        settings.translationTargetLanguage
+      );
     } else if (provider === 'speechmatics') {
       console.log('[Main] Creating SpeechmaticsTranscription service...');
       transcriptionService = new SpeechmaticsTranscription(settings.speechmaticsApiKey, settings.language, settings.diarization);

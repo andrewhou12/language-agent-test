@@ -4718,6 +4718,8 @@ class GladiaTranscription {
     ws = null;
     apiKey;
     language;
+    translationEnabled;
+    translationTargetLanguage;
     callbacks = null;
     isConnected = false;
     sessionId = null;
@@ -4731,10 +4733,21 @@ class GladiaTranscription {
         lastTranscriptTime: null,
         sessionId: null,
     };
-    constructor(apiKey, language = 'auto') {
+    // Store pending transcripts waiting for translation
+    pendingTranslations = new Map();
+    // Translation tracking for summary
+    translationStats = {
+        messagesReceived: 0,
+        translationsMatched: 0,
+        translationsTimedOut: 0,
+        lastTranslationText: '',
+    };
+    constructor(apiKey, language = 'auto', translationEnabled = false, translationTargetLanguage = 'en') {
         this.apiKey = apiKey;
         this.language = language;
-        console.log('[Gladia] Service initialized with language:', language);
+        this.translationEnabled = translationEnabled;
+        this.translationTargetLanguage = translationTargetLanguage;
+        console.log('[Gladia] Service initialized with language:', language, 'translation:', translationEnabled ? translationTargetLanguage : 'disabled');
         console.log('[Gladia] API key length:', apiKey?.length || 0);
     }
     setApiKey(apiKey) {
@@ -4777,8 +4790,40 @@ class GladiaTranscription {
             bit_depth: 16,
             channels: 1,
             languages,
+            translation: this.translationEnabled ? this.translationTargetLanguage : 'disabled',
         });
         try {
+            // Build request body
+            const requestBody = {
+                encoding: 'wav/pcm',
+                sample_rate: 16000,
+                bit_depth: 16,
+                channels: 1,
+                language_config: {
+                    languages: languages,
+                    code_switching: this.language === 'auto',
+                },
+                messages_config: {
+                    receive_partial_transcripts: true,
+                },
+            };
+            // Add translation config if enabled
+            if (this.translationEnabled) {
+                const targetLang = this.mapLanguageCode(this.translationTargetLanguage);
+                requestBody.realtime_processing = {
+                    translation: true,
+                    translation_config: {
+                        target_languages: [targetLang],
+                        model: 'base', // Use base for lower latency
+                        match_original_utterances: true,
+                    },
+                };
+                // Must enable these to receive translation events
+                requestBody.messages_config.receive_realtime_processing_events = true;
+                requestBody.messages_config.receive_final_transcripts = true;
+                console.log('[Gladia] Translation enabled, target:', targetLang);
+            }
+            console.log('[Gladia] Request body:', JSON.stringify(requestBody, null, 2));
             // Step 1: POST to get WebSocket URL
             const initResponse = await fetch('https://api.gladia.io/v2/live', {
                 method: 'POST',
@@ -4786,25 +4831,15 @@ class GladiaTranscription {
                     'x-gladia-key': this.apiKey,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    encoding: 'wav/pcm',
-                    sample_rate: 16000,
-                    bit_depth: 16,
-                    channels: 1,
-                    language_config: {
-                        languages: languages,
-                        code_switching: this.language === 'auto',
-                    },
-                    messages_config: {
-                        receive_partial_transcripts: true,
-                    },
-                }),
+                body: JSON.stringify(requestBody),
             });
             if (!initResponse.ok) {
                 const errorText = await initResponse.text();
                 throw new Error(`Gladia API error: ${initResponse.status} - ${errorText}`);
             }
-            const { id, url } = await initResponse.json();
+            const initData = await initResponse.json();
+            console.log('[Gladia] Init response:', JSON.stringify(initData, null, 2));
+            const { id, url } = initData;
             this.sessionId = id;
             this.diagnostics.sessionId = id;
             console.log('[Gladia] Session initialized, ID:', id);
@@ -4919,12 +4954,47 @@ class GladiaTranscription {
         this.isConnected = false;
         this.diagnostics.connectionState = 'disconnected';
         this.callbacks = null;
-        console.log('[Gladia] Final stats:', {
-            sessionId: this.sessionId,
-            audioChunksSent: this.diagnostics.audioChunksSent,
-            audioBytesSent: this.diagnostics.audioBytesSent,
-            transcriptsReceived: this.diagnostics.transcriptsReceived,
-        });
+        this.pendingTranslations.clear();
+        // Print comprehensive summary
+        console.log('\n========================================');
+        console.log('[Gladia] SESSION SUMMARY');
+        console.log('========================================');
+        console.log(`Session ID: ${this.sessionId}`);
+        console.log(`Language: ${this.language}`);
+        console.log(`Translation enabled: ${this.translationEnabled}`);
+        if (this.translationEnabled) {
+            console.log(`Translation target: ${this.translationTargetLanguage}`);
+        }
+        console.log('----------------------------------------');
+        console.log('AUDIO STATS:');
+        console.log(`  Chunks sent: ${this.diagnostics.audioChunksSent}`);
+        console.log(`  Bytes sent: ${(this.diagnostics.audioBytesSent / 1024).toFixed(1)} KB`);
+        console.log('----------------------------------------');
+        console.log('TRANSCRIPTION STATS:');
+        console.log(`  Transcripts received: ${this.diagnostics.transcriptsReceived}`);
+        console.log('----------------------------------------');
+        console.log('TRANSLATION STATS:');
+        console.log(`  Translation messages received: ${this.translationStats.messagesReceived}`);
+        console.log(`  Translations matched: ${this.translationStats.translationsMatched}`);
+        console.log(`  Translations timed out: ${this.translationStats.translationsTimedOut}`);
+        if (this.translationStats.lastTranslationText) {
+            console.log(`  Last translation: "${this.translationStats.lastTranslationText.substring(0, 80)}..."`);
+        }
+        console.log('----------------------------------------');
+        if (this.translationEnabled && this.translationStats.messagesReceived === 0) {
+            console.log('⚠️  WARNING: Translation was enabled but NO translation messages were received!');
+            console.log('    Possible causes:');
+            console.log('    - Translation not properly configured in request');
+            console.log('    - receive_realtime_processing_events not set to true');
+            console.log('    - API key may not have translation access');
+        }
+        if (this.translationStats.messagesReceived > 0 && this.translationStats.translationsMatched === 0) {
+            console.log('⚠️  WARNING: Translation messages received but NONE matched transcripts!');
+            console.log('    Possible causes:');
+            console.log('    - Utterance ID mismatch between transcript and translation');
+            console.log('    - Target language not found in translation results');
+        }
+        console.log('========================================\n');
     }
     /**
      * Check if connected to Gladia
@@ -4934,6 +5004,10 @@ class GladiaTranscription {
     }
     handleMessage(message) {
         const type = message.type;
+        // Log all non-audio_chunk messages to see what's coming
+        if (type !== 'audio_chunk') {
+            console.log(`[Gladia] Message type "${type}":`, JSON.stringify(message, null, 2));
+        }
         if (type === 'transcript') {
             this.diagnostics.transcriptsReceived++;
             this.diagnostics.lastTranscriptTime = Date.now();
@@ -4942,7 +5016,13 @@ class GladiaTranscription {
             const utterance = data?.utterance;
             const text = utterance?.text || '';
             const language = utterance?.language;
-            console.log(`[Gladia] Transcript: "${text}" (final: ${isFinal})`);
+            // Get transcript ID - try multiple fields and extract numeric part
+            const rawId = data?.id || data?.utterance_id || utterance?.id;
+            // Extract just the numeric part if ID is like "00_00000001" and convert to integer string
+            // This normalizes "00_00000001" -> "1" to match translation's utterance_id
+            const numericPart = rawId ? String(rawId).replace(/^.*_/, '') : String(this.diagnostics.transcriptsReceived);
+            const transcriptId = String(parseInt(numericPart, 10)); // "00000001" -> "1"
+            console.log(`[Gladia] Transcript: "${text}" (final: ${isFinal}, rawId: ${rawId}, parsedId: ${transcriptId})`);
             // Skip empty transcripts
             if (!text.trim()) {
                 console.log('[Gladia] Skipping empty transcript');
@@ -4951,13 +5031,61 @@ class GladiaTranscription {
             const result = {
                 text,
                 timestamp: Date.now(),
-                confidence: 1.0, // Gladia doesn't provide confidence in the same way
+                confidence: 1.0,
                 language: language || (this.language === 'auto' ? undefined : this.language),
                 isFinal,
-                speechFinal: isFinal, // Gladia uses is_final for both
+                speechFinal: isFinal,
             };
-            console.log('[Gladia] Sending transcript to overlay:', result.text);
-            this.callbacks?.onTranscript(result);
+            // If translation is enabled and this is a final transcript, wait briefly for translation
+            if (this.translationEnabled && isFinal && transcriptId) {
+                // Store the transcript for matching with translation
+                this.pendingTranslations.set(transcriptId, result);
+                console.log(`[Gladia] Stored transcript "${transcriptId}" waiting for translation. Pending: [${Array.from(this.pendingTranslations.keys()).join(', ')}]`);
+                // Set a timeout to send the transcript even if translation doesn't arrive
+                setTimeout(() => {
+                    const pending = this.pendingTranslations.get(transcriptId);
+                    if (pending) {
+                        console.log(`[Gladia] Timeout: sending transcript ${transcriptId} without translation`);
+                        this.pendingTranslations.delete(transcriptId);
+                        this.translationStats.translationsTimedOut++;
+                        this.callbacks?.onTranscript(pending);
+                    }
+                }, 2000); // 2 second timeout for translation
+            }
+            else {
+                // Send immediately for non-final or when translation is disabled
+                console.log('[Gladia] Sending transcript to overlay:', result.text);
+                this.callbacks?.onTranscript(result);
+            }
+        }
+        else if (type === 'translation') {
+            // Handle translation messages - these come separately from transcripts
+            this.translationStats.messagesReceived++;
+            const data = message.data;
+            console.log(`[Gladia] TRANSLATION MESSAGE RECEIVED (#${this.translationStats.messagesReceived})`);
+            const rawUtteranceId = data?.utterance_id;
+            const utteranceId = rawUtteranceId ? String(rawUtteranceId) : null;
+            const expectedTargetLang = this.mapLanguageCode(this.translationTargetLanguage);
+            // Gladia structure: translated_utterance contains the translation
+            // {
+            //   utterance_id: "3",
+            //   utterance: { text: "原文", language: "ja" },
+            //   translated_utterance: { text: "Translation", language: "en" }
+            // }
+            const translatedUtterance = data?.translated_utterance;
+            const translatedText = translatedUtterance?.text;
+            const translatedLang = translatedUtterance?.language || data?.target_language;
+            console.log(`[Gladia] utteranceId=${utteranceId}, targetLang=${translatedLang}, expected=${expectedTargetLang}`);
+            console.log(`[Gladia] Translation text: "${translatedText}"`);
+            if (!translatedText) {
+                console.log(`[Gladia] No translated_utterance.text found in message`);
+                return;
+            }
+            if (translatedLang !== expectedTargetLang) {
+                console.log(`[Gladia] Language mismatch: got ${translatedLang}, expected ${expectedTargetLang}`);
+                return;
+            }
+            this.processTranslation(utteranceId, translatedText);
         }
         else if (type === 'error') {
             const errorMsg = message.data?.message || message.message || 'Unknown error';
@@ -4969,7 +5097,7 @@ class GladiaTranscription {
             console.log('[Gladia] Connected message received');
         }
         else {
-            console.log('[Gladia] Unknown message type:', type, message);
+            console.log('[Gladia] Other message type:', type, JSON.stringify(message, null, 2));
         }
     }
     mapLanguage(language) {
@@ -4985,6 +5113,46 @@ class GladiaTranscription {
             auto: ['en', 'ja', 'ko', 'zh', 'es', 'fr', 'de'], // Multi-language support
         };
         return languageMap[language] || ['en'];
+    }
+    /**
+     * Map SupportedLanguage to Gladia's language code for translation
+     */
+    mapLanguageCode(language) {
+        const codeMap = {
+            ja: 'ja',
+            ko: 'ko',
+            zh: 'zh',
+            es: 'es',
+            fr: 'fr',
+            de: 'de',
+            en: 'en',
+            auto: 'en', // Default to English for auto
+        };
+        return codeMap[language] || 'en';
+    }
+    /**
+     * Process a translation and match it with pending transcript
+     */
+    processTranslation(utteranceId, translatedText) {
+        console.log(`[Gladia] Processing translation for utteranceId=${utteranceId}: "${translatedText}"`);
+        console.log(`[Gladia] Pending transcripts: [${Array.from(this.pendingTranslations.keys()).join(', ')}]`);
+        if (utteranceId && translatedText) {
+            // Find the matching pending transcript
+            const pending = this.pendingTranslations.get(utteranceId);
+            if (pending) {
+                // Add translation and send
+                pending.translation = translatedText;
+                this.pendingTranslations.delete(utteranceId);
+                this.translationStats.translationsMatched++;
+                this.translationStats.lastTranslationText = translatedText;
+                console.log(`[Gladia] Sending transcript with translation: "${pending.text}" -> "${translatedText}"`);
+                this.callbacks?.onTranscript(pending);
+            }
+            else {
+                // No matching transcript found - might have already been sent due to timeout
+                console.log(`[Gladia] Translation received but no pending transcript for ${utteranceId}`);
+            }
+        }
     }
     /**
      * Resample 24kHz audio to 16kHz using linear interpolation
@@ -5564,7 +5732,8 @@ async function startTranscription() {
         }
         else if (provider === 'gladia') {
             console.log('[Main] Creating GladiaTranscription service...');
-            transcriptionService = new gladia_transcription_1.GladiaTranscription(settings.gladiaApiKey, settings.language);
+            console.log('[Main] Translation enabled:', settings.translationEnabled, 'target:', settings.translationTargetLanguage);
+            transcriptionService = new gladia_transcription_1.GladiaTranscription(settings.gladiaApiKey, settings.language, settings.translationEnabled, settings.translationTargetLanguage);
         }
         else if (provider === 'speechmatics') {
             console.log('[Main] Creating SpeechmaticsTranscription service...');
@@ -6395,10 +6564,15 @@ exports.SpeechmaticsTranscription = SpeechmaticsTranscription;
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.OVERLAY_MODE_NAMES = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.TRANSLATION_DISPLAY_MODE_NAMES = exports.OVERLAY_MODE_NAMES = void 0;
 exports.OVERLAY_MODE_NAMES = {
     bubble: 'Floating Bubble',
     subtitle: 'Classic Subtitles',
+};
+exports.TRANSLATION_DISPLAY_MODE_NAMES = {
+    stacked: 'Stacked (Both)',
+    original: 'Original Only',
+    translation: 'Translation Only',
 };
 // Speaker colors for diarization display
 exports.SPEAKER_COLORS = {
@@ -6439,6 +6613,9 @@ exports.DEFAULT_SETTINGS = {
     gpuAcceleration: true,
     chunkSize: 2,
     diarization: false,
+    translationEnabled: false,
+    translationTargetLanguage: 'en',
+    translationDisplayMode: 'stacked',
     overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,

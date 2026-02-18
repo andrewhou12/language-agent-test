@@ -5,6 +5,7 @@ import {
   BubbleState,
   DEFAULT_BUBBLE_STATE,
   SPEAKER_COLORS,
+  TranslationDisplayMode,
 } from '../../shared/types';
 import type { OverlayAPI } from '../../main/preload-overlay';
 
@@ -17,6 +18,7 @@ interface TranscriptEntry {
   timestamp: number;
   isFinal: boolean;
   speaker?: number;
+  translation?: string;
 }
 
 // Configuration
@@ -30,9 +32,10 @@ interface SubtitleOverlayProps {
     onTranscription: (result: TranscriptionResult) => void,
     onClear: () => void
   ) => void;
+  translationDisplayMode: TranslationDisplayMode;
 }
 
-export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProps): React.ReactElement {
+export function SubtitleOverlay({ style, registerHandlers, translationDisplayMode }: SubtitleOverlayProps): React.ReactElement {
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [bubbleState, setBubbleState] = useState<BubbleState>(DEFAULT_BUBBLE_STATE);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -96,6 +99,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
               text: result.text,
               isFinal: true,
               speaker: result.speaker,
+              translation: result.translation,
             };
           } else {
             // No interim to replace, add as new final entry
@@ -108,6 +112,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
                 timestamp: result.timestamp,
                 isFinal: true,
                 speaker: result.speaker,
+                translation: result.translation,
               },
             ];
           }
@@ -120,6 +125,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
               text: result.text,
               timestamp: Date.now(),
               speaker: result.speaker,
+              translation: result.translation,
             };
           } else {
             const id = nextIdRef.current++;
@@ -131,6 +137,7 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
                 timestamp: result.timestamp,
                 isFinal: false,
                 speaker: result.speaker,
+                translation: result.translation,
               },
             ];
           }
@@ -173,18 +180,39 @@ export function SubtitleOverlay({ style, registerHandlers }: SubtitleOverlayProp
     return SPEAKER_COLORS[speaker % Object.keys(SPEAKER_COLORS).length];
   };
 
+  // Get display text based on translation mode
+  const getDisplayText = (t: TranscriptEntry): { primary: string; secondary?: string } => {
+    switch (translationDisplayMode) {
+      case 'translation':
+        // Show only translation (fall back to original if no translation)
+        return { primary: t.translation || t.text };
+      case 'original':
+        // Show only original
+        return { primary: t.text };
+      case 'stacked':
+      default:
+        // Show both (original primary, translation secondary)
+        return { primary: t.text, secondary: t.translation };
+    }
+  };
+
   // Build transcript text with proper spacing and speaker colors
   const renderTranscriptText = () => {
     return transcripts.map((t, index) => {
       // Only apply speaker color for final results (diarization is more accurate)
       const speakerColor = t.isFinal ? getSpeakerColor(t.speaker) : undefined;
+      const { primary, secondary } = getDisplayText(t);
+
       return (
         <span
           key={t.id}
-          className={`transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(t.text)}`}
+          className={`transcript-word ${t.isFinal ? 'final' : 'interim'} ${getLangClass(primary)}`}
           style={speakerColor ? { color: speakerColor } : undefined}
         >
-          {t.text}
+          {primary}
+          {secondary && (
+            <span className="translation-text"> ({secondary})</span>
+          )}
           {index < transcripts.length - 1 ? ' ' : ''}
         </span>
       );

@@ -13,11 +13,15 @@ export declare class GladiaTranscription implements TranscriptionService {
     private ws;
     private apiKey;
     private language;
+    private translationEnabled;
+    private translationTargetLanguage;
     private callbacks;
     private isConnected;
     private sessionId;
     private diagnostics;
-    constructor(apiKey: string, language?: SupportedLanguage);
+    private pendingTranslations;
+    private translationStats;
+    constructor(apiKey: string, language?: SupportedLanguage, translationEnabled?: boolean, translationTargetLanguage?: SupportedLanguage);
     setApiKey(apiKey: string): void;
     setLanguage(language: SupportedLanguage): void;
     /**
@@ -43,6 +47,14 @@ export declare class GladiaTranscription implements TranscriptionService {
     get connected(): boolean;
     private handleMessage;
     private mapLanguage;
+    /**
+     * Map SupportedLanguage to Gladia's language code for translation
+     */
+    private mapLanguageCode;
+    /**
+     * Process a translation and match it with pending transcript
+     */
+    private processTranslation;
     /**
      * Resample 24kHz audio to 16kHz using linear interpolation
      * Input: 16-bit PCM mono at 24kHz

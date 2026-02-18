@@ -11,10 +11,15 @@
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.OVERLAY_MODE_NAMES = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.TRANSLATION_DISPLAY_MODE_NAMES = exports.OVERLAY_MODE_NAMES = void 0;
 exports.OVERLAY_MODE_NAMES = {
     bubble: 'Floating Bubble',
     subtitle: 'Classic Subtitles',
+};
+exports.TRANSLATION_DISPLAY_MODE_NAMES = {
+    stacked: 'Stacked (Both)',
+    original: 'Original Only',
+    translation: 'Translation Only',
 };
 // Speaker colors for diarization display
 exports.SPEAKER_COLORS = {
@@ -55,6 +60,9 @@ exports.DEFAULT_SETTINGS = {
     gpuAcceleration: true,
     chunkSize: 2,
     diarization: false,
+    translationEnabled: false,
+    translationTargetLanguage: 'en',
+    translationDisplayMode: 'stacked',
     overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,

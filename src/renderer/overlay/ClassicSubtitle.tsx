@@ -3,6 +3,7 @@ import {
   TranscriptionResult,
   OverlayStyle,
   SPEAKER_COLORS,
+  TranslationDisplayMode,
 } from '../../shared/types';
 
 interface SubtitleEntry {
@@ -12,6 +13,7 @@ interface SubtitleEntry {
   isFadingOut: boolean;
   isFinal: boolean;
   speaker?: number;
+  translation?: string;
 }
 
 interface ClassicSubtitleProps {
@@ -20,9 +22,10 @@ interface ClassicSubtitleProps {
     onTranscription: (result: TranscriptionResult) => void,
     onClear: () => void
   ) => void;
+  translationDisplayMode: TranslationDisplayMode;
 }
 
-export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProps): React.ReactElement {
+export function ClassicSubtitle({ style, registerHandlers, translationDisplayMode }: ClassicSubtitleProps): React.ReactElement {
   const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
   const [isListening, setIsListening] = useState(true);
   const nextIdRef = useRef(0);
@@ -76,6 +79,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               text: result.text,
               isFinal: true,
               speaker: result.speaker,
+              translation: result.translation,
             };
             // Schedule fade-out for the now-final entry
             scheduleRemoval(updated[lastInterimIndex].id, style.displayDuration);
@@ -90,6 +94,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               isFadingOut: false,
               isFinal: true,
               speaker: result.speaker,
+              translation: result.translation,
             };
             scheduleRemoval(id, style.displayDuration);
             const maxToKeep = style.maxLines;
@@ -105,6 +110,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               ...updated[lastInterimIndex],
               text: result.text,
               speaker: result.speaker,
+              translation: result.translation,
             };
             return updated;
           } else {
@@ -117,6 +123,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               isFadingOut: false,
               isFinal: false,
               speaker: result.speaker,
+              translation: result.translation,
             };
             const maxToKeep = style.maxLines;
             const kept = prev.slice(-(maxToKeep - 1));
@@ -189,6 +196,22 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
     return SPEAKER_COLORS[speaker % Object.keys(SPEAKER_COLORS).length];
   };
 
+  // Get display text based on translation mode
+  const getDisplayText = (subtitle: SubtitleEntry): { primary: string; secondary?: string } => {
+    switch (translationDisplayMode) {
+      case 'translation':
+        // Show only translation (fall back to original if no translation)
+        return { primary: subtitle.translation || subtitle.text };
+      case 'original':
+        // Show only original
+        return { primary: subtitle.text };
+      case 'stacked':
+      default:
+        // Show both (original primary, translation secondary)
+        return { primary: subtitle.text, secondary: subtitle.translation };
+    }
+  };
+
   return (
     <div
       className={`subtitle-overlay ${positionClass}`}
@@ -205,18 +228,22 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
         {subtitles.map((subtitle) => {
           // Only apply speaker color for final results (diarization is more accurate)
           const speakerColor = subtitle.isFinal ? getSpeakerColor(subtitle.speaker) : undefined;
+          const { primary, secondary } = getDisplayText(subtitle);
           return (
             <div
               key={subtitle.id}
               className={`subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${
                 style.textShadow ? 'text-shadow' : ''
-              } ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`}
+              } ${style.textOutline ? 'text-outline' : ''} ${getLangClass(primary)}`}
               style={{
                 ...lineStyle,
                 color: speakerColor || style.textColor,
               }}
             >
-              {subtitle.text}
+              {primary}
+              {secondary && (
+                <div className="subtitle-translation">{secondary}</div>
+              )}
             </div>
           );
         })}

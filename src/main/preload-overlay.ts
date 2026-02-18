@@ -6,7 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { TranscriptionResult, OverlayStyle, BubbleState, OverlayMode, IPC_CHANNELS } from '../shared/types';
+import { TranscriptionResult, OverlayStyle, BubbleState, OverlayMode, AppSettings, IPC_CHANNELS } from '../shared/types';
 
 // Define the API exposed to the overlay renderer
 export interface OverlayAPI {
@@ -15,6 +15,9 @@ export interface OverlayAPI {
   onClearTranscription: (callback: () => void) => void;
   onStyleUpdate: (callback: (style: OverlayStyle) => void) => void;
   onOverlayModeChange: (callback: (mode: OverlayMode) => void) => void;
+
+  // Settings
+  getSettings: () => Promise<AppSettings>;
 
   // Overlay mode
   getOverlayMode: () => Promise<OverlayMode>;
@@ -46,6 +49,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onOverlayModeChange: (callback: (mode: OverlayMode) => void) => {
     ipcRenderer.on(IPC_CHANNELS.SET_OVERLAY_MODE, (_event, mode) => callback(mode));
   },
+
+  // Settings
+  getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS),
 
   // Overlay mode
   getOverlayMode: () => ipcRenderer.invoke(IPC_CHANNELS.GET_OVERLAY_MODE),

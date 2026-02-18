@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { ClassicSubtitle } from './ClassicSubtitle';
-import { OverlayMode, TranscriptionResult, OverlayStyle, DEFAULT_OVERLAY_STYLE } from '../../shared/types';
+import { OverlayMode, TranscriptionResult, OverlayStyle, TranslationDisplayMode, DEFAULT_OVERLAY_STYLE } from '../../shared/types';
 import type { OverlayAPI } from '../../main/preload-overlay';
 import './styles.css';
 
@@ -12,6 +12,7 @@ function OverlayRoot(): React.ReactElement {
   const [mode, setMode] = useState<OverlayMode>('bubble');
   const [isLoading, setIsLoading] = useState(true);
   const [style, setStyle] = useState<OverlayStyle>(DEFAULT_OVERLAY_STYLE);
+  const [translationDisplayMode, setTranslationDisplayMode] = useState<TranslationDisplayMode>('stacked');
 
   // Use a ref to store the current transcription handler from the active child
   const transcriptionHandlerRef = useRef<((result: TranscriptionResult) => void) | null>(null);
@@ -43,9 +44,13 @@ function OverlayRoot(): React.ReactElement {
 
   // Initialize mode and listen for mode changes
   useEffect(() => {
-    // Get initial overlay mode
-    electronAPI.getOverlayMode().then((overlayMode) => {
+    // Get initial overlay mode and translation settings
+    Promise.all([
+      electronAPI.getOverlayMode(),
+      electronAPI.getSettings(),
+    ]).then(([overlayMode, settings]) => {
       setMode(overlayMode);
+      setTranslationDisplayMode(settings.translationDisplayMode || 'stacked');
       setIsLoading(false);
     });
 
@@ -78,9 +83,9 @@ function OverlayRoot(): React.ReactElement {
 
   // Pass style and handler registration to child components
   return mode === 'bubble' ? (
-    <SubtitleOverlay style={style} registerHandlers={registerHandlers} />
+    <SubtitleOverlay style={style} registerHandlers={registerHandlers} translationDisplayMode={translationDisplayMode} />
   ) : (
-    <ClassicSubtitle style={style} registerHandlers={registerHandlers} />
+    <ClassicSubtitle style={style} registerHandlers={registerHandlers} translationDisplayMode={translationDisplayMode} />
   );
 }
 

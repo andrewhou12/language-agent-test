@@ -4,6 +4,8 @@ export type SupportedLanguage = 'ja' | 'ko' | 'zh' | 'es' | 'fr' | 'de' | 'en' |
 export type TranscriptionProvider = 'deepgram' | 'gladia' | 'speechmatics';
 export type OverlayMode = 'bubble' | 'subtitle';
 export declare const OVERLAY_MODE_NAMES: Record<OverlayMode, string>;
+export type TranslationDisplayMode = 'stacked' | 'original' | 'translation';
+export declare const TRANSLATION_DISPLAY_MODE_NAMES: Record<TranslationDisplayMode, string>;
 export interface TranscriptionResult {
     text: string;
     timestamp: number;
@@ -12,6 +14,7 @@ export interface TranscriptionResult {
     isFinal?: boolean;
     speechFinal?: boolean;
     speaker?: number;
+    translation?: string;
 }
 export declare const SPEAKER_COLORS: Record<number, string>;
 export interface SavedTranscript {
@@ -65,6 +68,9 @@ export interface AppSettings {
     gpuAcceleration: boolean;
     chunkSize: number;
     diarization: boolean;
+    translationEnabled: boolean;
+    translationTargetLanguage: SupportedLanguage;
+    translationDisplayMode: TranslationDisplayMode;
     overlayMode: OverlayMode;
     overlayStyle: OverlayStyle;
     bubbleState: BubbleState;

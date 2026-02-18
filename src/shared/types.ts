@@ -23,6 +23,14 @@ export const OVERLAY_MODE_NAMES: Record<OverlayMode, string> = {
   subtitle: 'Classic Subtitles',
 };
 
+export type TranslationDisplayMode = 'stacked' | 'original' | 'translation';
+
+export const TRANSLATION_DISPLAY_MODE_NAMES: Record<TranslationDisplayMode, string> = {
+  stacked: 'Stacked (Both)',
+  original: 'Original Only',
+  translation: 'Translation Only',
+};
+
 export interface TranscriptionResult {
   text: string;
   timestamp: number;
@@ -31,6 +39,7 @@ export interface TranscriptionResult {
   isFinal?: boolean;      // Whether this is the final transcription for this segment
   speechFinal?: boolean;  // Whether the speaker has finished this utterance
   speaker?: number;       // Speaker ID from diarization (0, 1, 2, etc.)
+  translation?: string;   // Translated text (if translation enabled)
 }
 
 // Speaker colors for diarization display
@@ -105,6 +114,11 @@ export interface AppSettings {
   // Transcription features
   diarization: boolean; // Enable speaker diarization
 
+  // Translation settings (Gladia only)
+  translationEnabled: boolean;
+  translationTargetLanguage: SupportedLanguage;
+  translationDisplayMode: TranslationDisplayMode;
+
   // Overlay settings
   overlayMode: OverlayMode;
   overlayStyle: OverlayStyle;
@@ -151,6 +165,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   gpuAcceleration: true,
   chunkSize: 2,
   diarization: false,
+  translationEnabled: false,
+  translationTargetLanguage: 'en',
+  translationDisplayMode: 'stacked',
   overlayMode: 'bubble',
   overlayStyle: DEFAULT_OVERLAY_STYLE,
   bubbleState: DEFAULT_BUBBLE_STATE,
