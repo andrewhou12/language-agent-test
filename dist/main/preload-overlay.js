@@ -11,10 +11,19 @@
 
 // Shared type definitions for the Language Agent application
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.OVERLAY_MODE_NAMES = void 0;
+exports.IPC_CHANNELS = exports.MODEL_INFO = exports.PROVIDER_NAMES = exports.LANGUAGE_NAMES = exports.DEFAULT_SETTINGS = exports.DEFAULT_BUBBLE_STATE = exports.DEFAULT_OVERLAY_STYLE = exports.SPEAKER_COLORS = exports.OVERLAY_MODE_NAMES = void 0;
 exports.OVERLAY_MODE_NAMES = {
     bubble: 'Floating Bubble',
     subtitle: 'Classic Subtitles',
+};
+// Speaker colors for diarization display
+exports.SPEAKER_COLORS = {
+    0: '#60A5FA', // Blue
+    1: '#34D399', // Green
+    2: '#F472B6', // Pink
+    3: '#FBBF24', // Yellow
+    4: '#A78BFA', // Purple
+    5: '#FB923C', // Orange
 };
 exports.DEFAULT_OVERLAY_STYLE = {
     position: 'bottom',
@@ -40,10 +49,12 @@ exports.DEFAULT_SETTINGS = {
     transcriptionProvider: 'deepgram',
     deepgramApiKey: '',
     gladiaApiKey: '',
+    speechmaticsApiKey: '',
     whisperModel: 'base',
     language: 'auto',
     gpuAcceleration: true,
     chunkSize: 2,
+    diarization: false,
     overlayMode: 'bubble',
     overlayStyle: exports.DEFAULT_OVERLAY_STYLE,
     bubbleState: exports.DEFAULT_BUBBLE_STATE,
@@ -65,6 +76,7 @@ exports.LANGUAGE_NAMES = {
 exports.PROVIDER_NAMES = {
     deepgram: 'Deepgram',
     gladia: 'Gladia',
+    speechmatics: 'Speechmatics',
 };
 exports.MODEL_INFO = {
     tiny: { size: '~75MB', speed: 'Fastest', accuracy: 'Good' },

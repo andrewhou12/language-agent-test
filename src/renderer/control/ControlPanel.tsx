@@ -55,6 +55,7 @@ export function ControlPanel(): React.ReactElement {
   const [isLoading, setIsLoading] = useState(true);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [gladiaApiKeyInput, setGladiaApiKeyInput] = useState('');
+  const [speechmaticsApiKeyInput, setSpeechmaticsApiKeyInput] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsData | null>(null);
@@ -82,6 +83,7 @@ export function ControlPanel(): React.ReactElement {
         setSettings(currentSettings);
         setApiKeyInput(currentSettings.deepgramApiKey || '');
         setGladiaApiKeyInput(currentSettings.gladiaApiKey || '');
+        setSpeechmaticsApiKeyInput(currentSettings.speechmaticsApiKey || '');
       } catch (err) {
         setError('Failed to load settings');
       } finally {
@@ -198,6 +200,19 @@ export function ControlPanel(): React.ReactElement {
     setError(null);
   }, [settings, gladiaApiKeyInput]);
 
+  const handleSpeechmaticsApiKeySave = useCallback(async () => {
+    if (!settings) return;
+    const updated = await window.electronAPI.updateSettings({ speechmaticsApiKey: speechmaticsApiKeyInput });
+    setSettings(updated);
+    setError(null);
+  }, [settings, speechmaticsApiKeyInput]);
+
+  const handleDiarizationToggle = useCallback(async () => {
+    if (!settings) return;
+    const updated = await window.electronAPI.updateSettings({ diarization: !settings.diarization });
+    setSettings(updated);
+  }, [settings]);
+
   const toggleSection = (section: string) => {
     setExpandedSection(expandedSection === section ? null : section);
   };
@@ -216,7 +231,11 @@ export function ControlPanel(): React.ReactElement {
   const isTransitioning = state === 'starting' || state === 'stopping';
   const isActive = state === 'active';
   const provider = settings.transcriptionProvider || 'deepgram';
-  const hasApiKey = provider === 'deepgram' ? !!settings.deepgramApiKey : !!settings.gladiaApiKey;
+  const hasApiKey = provider === 'deepgram'
+    ? !!settings.deepgramApiKey
+    : provider === 'gladia'
+      ? !!settings.gladiaApiKey
+      : !!settings.speechmaticsApiKey;
   const statusConfig = STATUS_CONFIG[state];
 
   return (
@@ -327,8 +346,12 @@ export function ControlPanel(): React.ReactElement {
                 <div className="input-with-button">
                   <input
                     type={showApiKey ? 'text' : 'password'}
-                    value={provider === 'deepgram' ? apiKeyInput : gladiaApiKeyInput}
-                    onChange={(e) => provider === 'deepgram' ? setApiKeyInput(e.target.value) : setGladiaApiKeyInput(e.target.value)}
+                    value={provider === 'deepgram' ? apiKeyInput : provider === 'gladia' ? gladiaApiKeyInput : speechmaticsApiKeyInput}
+                    onChange={(e) => {
+                      if (provider === 'deepgram') setApiKeyInput(e.target.value);
+                      else if (provider === 'gladia') setGladiaApiKeyInput(e.target.value);
+                      else setSpeechmaticsApiKeyInput(e.target.value);
+                    }}
                     placeholder={`Enter your ${PROVIDER_NAMES[provider]} API key`}
                     disabled={isActive}
                   />
@@ -341,15 +364,37 @@ export function ControlPanel(): React.ReactElement {
                   </button>
                 </div>
                 {((provider === 'deepgram' && apiKeyInput !== settings.deepgramApiKey) ||
-                  (provider === 'gladia' && gladiaApiKeyInput !== settings.gladiaApiKey)) && (
+                  (provider === 'gladia' && gladiaApiKeyInput !== settings.gladiaApiKey) ||
+                  (provider === 'speechmatics' && speechmaticsApiKeyInput !== settings.speechmaticsApiKey)) && (
                   <button
                     className="save-button"
-                    onClick={provider === 'deepgram' ? handleApiKeySave : handleGladiaApiKeySave}
+                    onClick={provider === 'deepgram' ? handleApiKeySave : provider === 'gladia' ? handleGladiaApiKeySave : handleSpeechmaticsApiKeySave}
                   >
                     Save API Key
                   </button>
                 )}
               </div>
+
+              {(provider === 'deepgram' || provider === 'speechmatics') && (
+                <div className="field-group">
+                  <div className="toggle-row">
+                    <div className="toggle-label">
+                      <SpeakersIcon />
+                      <div>
+                        <span>Speaker Diarization</span>
+                        <span className="toggle-description">Color-code different speakers</span>
+                      </div>
+                    </div>
+                    <button
+                      className={`toggle-switch ${settings.diarization ? 'active' : ''}`}
+                      onClick={handleDiarizationToggle}
+                      disabled={isActive}
+                    >
+                      <span className="toggle-slider" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -667,6 +712,17 @@ function SubtitlePreviewIcon(): React.ReactElement {
       <rect x="2" y="2" width="20" height="20" rx="2" />
       <rect x="4" y="14" width="16" height="4" rx="1" fill="currentColor" opacity="0.2" />
       <path d="M6 16h12" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SpeakersIcon(): React.ReactElement {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   );
 }

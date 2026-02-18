@@ -20,6 +20,7 @@ export class DeepgramTranscription implements TranscriptionService {
   private connection: ListenLiveClient | null = null;
   private apiKey: string;
   private language: SupportedLanguage;
+  private diarization: boolean;
   private callbacks: TranscriptionCallbacks | null = null;
   private keepAliveInterval: NodeJS.Timeout | null = null;
   private isConnected: boolean = false;
@@ -35,10 +36,11 @@ export class DeepgramTranscription implements TranscriptionService {
     keepAlivesSent: 0,
   };
 
-  constructor(apiKey: string, language: SupportedLanguage = 'auto') {
+  constructor(apiKey: string, language: SupportedLanguage = 'auto', diarization: boolean = false) {
     this.apiKey = apiKey;
     this.language = language;
-    console.log('[Deepgram] Service initialized with language:', language);
+    this.diarization = diarization;
+    console.log('[Deepgram] Service initialized with language:', language, 'diarization:', diarization);
     console.log('[Deepgram] API key length:', apiKey?.length || 0);
   }
 
@@ -88,8 +90,9 @@ export class DeepgramTranscription implements TranscriptionService {
       model: 'nova-3',
       language: languageCode,
       encoding: 'linear16',
-      sample_rate: 16000,  // Match Deepgram example app (16kHz optimal)
+      sample_rate: 24000,
       channels: 1,
+      diarize: this.diarization,
     });
 
     try {
@@ -103,8 +106,9 @@ export class DeepgramTranscription implements TranscriptionService {
         endpointing: 300,
         vad_events: true,
         encoding: 'linear16',
-        sample_rate: 24000,  // Testing: send 24kHz directly without resampling
+        sample_rate: 24000,
         channels: 1,
+        diarize: this.diarization,
       });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -281,8 +285,52 @@ export class DeepgramTranscription implements TranscriptionService {
     const isFinal = data.is_final || false;
     const speechFinal = data.speech_final || false;
 
+    // Extract speaker from words array (diarization)
+    // Note: Speaker data is most reliable in final results; interim results may not have accurate diarization
+    let speaker: number | undefined = undefined;
+    if (this.diarization && isFinal) {
+      console.log(`[Deepgram] Diarization enabled (final result), checking words array...`);
+      console.log(`[Deepgram] alternative.words exists: ${!!alternative.words}, length: ${alternative.words?.length || 0}`);
+
+      if (alternative.words && alternative.words.length > 0) {
+        // Log first word to see structure
+        console.log(`[Deepgram] First word structure:`, JSON.stringify(alternative.words[0], null, 2));
+
+        // Find the most common speaker in this transcript segment
+        const speakerCounts = new Map<number, number>();
+        for (const word of alternative.words) {
+          if (typeof word.speaker === 'number') {
+            speakerCounts.set(word.speaker, (speakerCounts.get(word.speaker) || 0) + 1);
+          }
+        }
+
+        // Get the speaker with the most words
+        let maxCount = 0;
+        for (const [spk, count] of speakerCounts) {
+          if (count > maxCount) {
+            maxCount = count;
+            speaker = spk;
+          }
+        }
+
+        // Log speaker detection results
+        const uniqueSpeakers = speakerCounts.size;
+        console.log(`[Deepgram] Diarization: detected speaker ${speaker} (${uniqueSpeakers} unique speaker(s) in segment, counts: ${JSON.stringify([...speakerCounts])})`);
+
+        // Warn if only one speaker detected across multiple words - might indicate diarization not working well
+        if (uniqueSpeakers === 1 && alternative.words.length > 5) {
+          console.log(`[Deepgram] Note: Only 1 speaker detected in ${alternative.words.length} words - diarization may not be distinguishing voices`);
+        }
+      } else {
+        console.log(`[Deepgram] No words array available for diarization in final result`);
+      }
+    } else if (this.diarization && !isFinal) {
+      // For interim results, skip diarization processing - it's not reliable
+      console.log(`[Deepgram] Skipping diarization for interim result`);
+    }
+
     // Log all transcripts, even empty ones for debugging
-    console.log(`[Deepgram] Transcript: "${transcript}" (final: ${isFinal}, speech_final: ${speechFinal}, confidence: ${confidence.toFixed(2)})`);
+    console.log(`[Deepgram] Transcript: "${transcript}" (final: ${isFinal}, speech_final: ${speechFinal}, confidence: ${confidence.toFixed(2)}, speaker: ${speaker ?? 'N/A'})`);
 
     // Skip empty transcripts
     if (!transcript.trim()) {
@@ -297,6 +345,7 @@ export class DeepgramTranscription implements TranscriptionService {
       language: this.language === 'auto' ? undefined : this.language,
       isFinal,
       speechFinal,
+      speaker,
     };
 
     console.log('[Deepgram] Sending transcript to overlay:', result.text);

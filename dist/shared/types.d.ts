@@ -1,7 +1,7 @@
 export type TranscriptionState = 'idle' | 'starting' | 'active' | 'stopping';
 export type WhisperModel = 'tiny' | 'base' | 'small';
 export type SupportedLanguage = 'ja' | 'ko' | 'zh' | 'es' | 'fr' | 'de' | 'en' | 'auto';
-export type TranscriptionProvider = 'deepgram' | 'gladia';
+export type TranscriptionProvider = 'deepgram' | 'gladia' | 'speechmatics';
 export type OverlayMode = 'bubble' | 'subtitle';
 export declare const OVERLAY_MODE_NAMES: Record<OverlayMode, string>;
 export interface TranscriptionResult {
@@ -11,7 +11,9 @@ export interface TranscriptionResult {
     language?: string;
     isFinal?: boolean;
     speechFinal?: boolean;
+    speaker?: number;
 }
+export declare const SPEAKER_COLORS: Record<number, string>;
 export interface SavedTranscript {
     id: string;
     title: string;
@@ -57,10 +59,12 @@ export interface AppSettings {
     transcriptionProvider: TranscriptionProvider;
     deepgramApiKey: string;
     gladiaApiKey: string;
+    speechmaticsApiKey: string;
     whisperModel: WhisperModel;
     language: SupportedLanguage;
     gpuAcceleration: boolean;
     chunkSize: number;
+    diarization: boolean;
     overlayMode: OverlayMode;
     overlayStyle: OverlayStyle;
     bubbleState: BubbleState;

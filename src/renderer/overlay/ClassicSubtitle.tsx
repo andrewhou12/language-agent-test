@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   TranscriptionResult,
   OverlayStyle,
+  SPEAKER_COLORS,
 } from '../../shared/types';
 
 interface SubtitleEntry {
@@ -10,6 +11,7 @@ interface SubtitleEntry {
   timestamp: number;
   isFadingOut: boolean;
   isFinal: boolean;
+  speaker?: number;
 }
 
 interface ClassicSubtitleProps {
@@ -73,6 +75,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               ...updated[lastInterimIndex],
               text: result.text,
               isFinal: true,
+              speaker: result.speaker,
             };
             // Schedule fade-out for the now-final entry
             scheduleRemoval(updated[lastInterimIndex].id, style.displayDuration);
@@ -86,6 +89,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               timestamp: result.timestamp,
               isFadingOut: false,
               isFinal: true,
+              speaker: result.speaker,
             };
             scheduleRemoval(id, style.displayDuration);
             const maxToKeep = style.maxLines;
@@ -100,6 +104,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
             updated[lastInterimIndex] = {
               ...updated[lastInterimIndex],
               text: result.text,
+              speaker: result.speaker,
             };
             return updated;
           } else {
@@ -111,6 +116,7 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
               timestamp: result.timestamp,
               isFadingOut: false,
               isFinal: false,
+              speaker: result.speaker,
             };
             const maxToKeep = style.maxLines;
             const kept = prev.slice(-(maxToKeep - 1));
@@ -177,6 +183,12 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
     return '';
   };
 
+  // Get speaker color
+  const getSpeakerColor = (speaker?: number): string | undefined => {
+    if (speaker === undefined) return undefined;
+    return SPEAKER_COLORS[speaker % Object.keys(SPEAKER_COLORS).length];
+  };
+
   return (
     <div
       className={`subtitle-overlay ${positionClass}`}
@@ -190,17 +202,24 @@ export function ClassicSubtitle({ style, registerHandlers }: ClassicSubtitleProp
           </div>
         )}
 
-        {subtitles.map((subtitle) => (
-          <div
-            key={subtitle.id}
-            className={`subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${
-              style.textShadow ? 'text-shadow' : ''
-            } ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`}
-            style={lineStyle}
-          >
-            {subtitle.text}
-          </div>
-        ))}
+        {subtitles.map((subtitle) => {
+          // Only apply speaker color for final results (diarization is more accurate)
+          const speakerColor = subtitle.isFinal ? getSpeakerColor(subtitle.speaker) : undefined;
+          return (
+            <div
+              key={subtitle.id}
+              className={`subtitle-line ${subtitle.isFadingOut ? 'fading-out' : ''} ${
+                style.textShadow ? 'text-shadow' : ''
+              } ${style.textOutline ? 'text-outline' : ''} ${getLangClass(subtitle.text)}`}
+              style={{
+                ...lineStyle,
+                color: speakerColor || style.textColor,
+              }}
+            >
+              {subtitle.text}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
